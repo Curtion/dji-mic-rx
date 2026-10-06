@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 一次性把"驱动包签名"和"构建 exe"一起做完：
 
