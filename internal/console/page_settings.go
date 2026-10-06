@@ -140,6 +140,7 @@ func readOnlyHint(setting duml.Setting) string {
 // changes it. Every row the page lists is one the protocol can write.
 func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, setting duml.Setting) {
 	value := snap.State.Setting(setting.ID)
+	pending := a.settingPending(setting.ID, 0)
 
 	switch setting.Kind {
 	case duml.KindToggle:
@@ -147,15 +148,18 @@ func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, settin
 		fieldRow(c, p, setting.Label, setting.Detail, func() {
 			// The switch joins the row it is built in, so it has to be
 			// created here rather than before the row.
-			reply := ui.Switch(c, &on).Label(setting.Label).Disabled(!snap.Connected)
-			if !reply.Changed() {
-				return
+			reply := ui.Switch(c, &on).Label(setting.Label).Disabled(!snap.Connected || pending)
+			if reply.Changed() {
+				next := setting.Off
+				if on {
+					next = setting.On
+				}
+				a.setSetting(c, setting.ID, next)
+				on = value == setting.On
 			}
-			next := setting.Off
-			if on {
-				next = setting.On
+			if pending {
+				settingProgress(c, p)
 			}
-			a.setSetting(c, setting.ID, next)
 		})
 
 	default:
@@ -170,11 +174,25 @@ func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, settin
 			labels = append(labels, option.Label)
 		}
 		fieldRow(c, p, setting.Label, setting.Detail, func() {
+			previous := selected
 			reply := ui.Segmented(c, &selected, labels...).
-				Label(setting.Label).Disabled(!snap.Connected)
+				Label(setting.Label).Disabled(!snap.Connected || pending)
 			if reply.Changed() && selected >= 0 && selected < len(setting.Options) {
 				a.setSetting(c, setting.ID, setting.Options[selected].Value)
+				selected = previous
+			}
+			if pending {
+				settingProgress(c, p)
 			}
 		})
 	}
+}
+
+func settingProgress(c *ui.Context, p palette) {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		if !c.Preferences().ReduceMotion {
+			ui.Spinner(c).Label("等待设备确认").Size(14, 14)
+		}
+		ui.Text(c, "等待设备确认").FontSize(sizeUnit).TextColor(p.inkDim).SingleLine()
+	})
 }

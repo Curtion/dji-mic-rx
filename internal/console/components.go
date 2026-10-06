@@ -185,7 +185,7 @@ func fieldRow(c *ui.Context, p palette, label, detail string, control func()) *u
 				ui.Text(c, detail).FontSize(sizeLabel).TextColor(p.inkDim)
 			}
 		})
-		ui.Row(c).Shrink(0).Children(control)
+		ui.Row(c).Shrink(0).Gap(10).AlignItems(ui.Center).Children(control)
 	})
 }
 

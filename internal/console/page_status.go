@@ -201,6 +201,7 @@ func (a *App) levelRow(c *ui.Context, p palette, snap session.Snapshot, index in
 // device, and only the Mic Mini 2 has it, so it sits on the transmitter's card
 // rather than among the shared settings.
 func (a *App) voiceToneRow(c *ui.Context, p palette, tx duml.TXInfo, index int, tone duml.Setting) {
+	pending := a.settingPending(tone.ID, index+1)
 	selected := 0
 	for i, option := range tone.Options {
 		if option.Value == tx.VoiceTone {
@@ -215,15 +216,21 @@ func (a *App) voiceToneRow(c *ui.Context, p palette, tx duml.TXInfo, index int, 
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, tone.Label).FontSize(sizeLabel).TextColor(p.inkDim)
 			ui.Spacer(c)
-			ui.Text(c, condition(tx.VoiceTone == "", "未知", duml.VoiceToneLabel(tx.VoiceTone))).
-				FontSize(sizeLabel).TextColor(p.inkFaint)
+			if pending {
+				settingProgress(c, p)
+			} else {
+				ui.Text(c, condition(tx.VoiceTone == "", "未知", duml.VoiceToneLabel(tx.VoiceTone))).
+					FontSize(sizeLabel).TextColor(p.inkFaint)
+			}
 		})
 		if !tx.Present {
 			unavailableNote(c, p, "发射器未连接，暂不可设置")
 			return
 		}
-		if ui.Segmented(c, &selected, labels...).Label(tone.Label).Changed() {
+		previous := selected
+		if ui.Segmented(c, &selected, labels...).Label(tone.Label).Disabled(pending).Changed() {
 			a.setVoiceTone(c, index+1, tone.Options[selected].Value)
+			selected = previous
 		}
 	})
 }
@@ -247,19 +254,11 @@ func (a *App) linkLine(c *ui.Context, p palette, connected bool, name string) {
 	})
 }
 
-// deviceName is what to call the receiver: its own product name once the
-// identity push has arrived, otherwise the generation the protocol implies.
 func (a *App) deviceName(snap session.Snapshot) string {
 	if snap.State.RX.Name != "" {
 		return snap.State.RX.Name
 	}
-	switch snap.State.Dialect {
-	case duml.V1:
-		return "初代 Mic Mini"
-	case duml.V2:
-		return "Mic Mini 2"
-	}
-	return ""
+	return "大疆Mic 接收器"
 }
 
 // product is the best name for the receiver, used to decide whether a setting

@@ -35,8 +35,7 @@ type Source interface {
 	Rescan()
 	// Log records a line in the activity log.
 	Log(format string, a ...any)
-	// Send writes a shared setting and waits for the receiver's
-	// acknowledgement.
+	// Send waits until the device reports the requested value.
 	Send(settingID, value string) error
 	// SendToTransmitter writes a per-transmitter setting to one unit.
 	SendToTransmitter(settingID, value string, unit int) error
@@ -64,12 +63,18 @@ type App struct {
 	mu          sync.Mutex
 	notice      string
 	noticeError bool
+	pending     map[settingKey]bool
+}
+
+type settingKey struct {
+	id   string
+	unit int
 }
 
 // New returns the app for a source: the device session in the app, or a
 // stand-in in tests.
 func New(sess Source) *App {
-	return &App{sess: sess, scroll: make([]ui.ScrollState, len(pages))}
+	return &App{sess: sess, scroll: make([]ui.ScrollState, len(pages)), pending: make(map[settingKey]bool)}
 }
 
 // ShowPage selects a page by id, for the driver badge to send the user to
@@ -87,38 +92,58 @@ func (a *App) ShowPage(id string) {
 // guards its own state.
 func (a *App) snapshot() session.Snapshot { return a.sess.Snapshot() }
 
-// setSetting writes a shared setting. The command is sent from its own
-// goroutine: writing and waiting for the receiver's acknowledgement must not
-// hold up the frame that is being drawn, and the receiver's own status pushes
-// are what confirm the new value on screen.
+// Device confirmation must not block the UI thread.
 func (a *App) setSetting(c *ui.Context, id, value string) {
+	a.sendSetting(id, value, 0)
+}
+
+func (a *App) setVoiceTone(c *ui.Context, unit int, value string) {
+	a.sendSetting("voice-tone", value, unit)
+}
+
+func (a *App) sendSetting(id, value string, unit int) {
 	setting, known := duml.SettingByID(id)
 	if !known {
 		return
 	}
+	key := settingKey{id: id, unit: unit}
+	a.mu.Lock()
+	if a.pending[key] {
+		a.mu.Unlock()
+		return
+	}
+	a.pending[key] = true
+	a.mu.Unlock()
+
 	label := setting.Label + "：" + valueLabel(setting, value)
-	a.notify("已发送 " + label)
+	if unit > 0 {
+		label = "发射器 " + strconv.Itoa(unit) + " " + label
+	}
+	a.sess.Log("正在设置 %s", label)
 	go func() {
-		if err := a.sess.Send(id, value); err != nil {
+		var err error
+		if unit > 0 {
+			err = a.sess.SendToTransmitter(id, value, unit)
+		} else {
+			err = a.sess.Send(id, value)
+		}
+		a.mu.Lock()
+		delete(a.pending, key)
+		a.mu.Unlock()
+		if err != nil {
 			a.notifyError(err.Error())
+			a.sess.Log("设置未确认：%v", err)
 			return
 		}
+		a.notify("已设置 " + label)
 		a.sess.Log("已设置 %s", label)
 	}()
 }
 
-// setVoiceTone writes one transmitter's voice tone.
-func (a *App) setVoiceTone(c *ui.Context, unit int, value string) {
-	setting, _ := duml.SettingByID("voice-tone")
-	label := "发射器 " + strconv.Itoa(unit) + " 音色：" + valueLabel(setting, value)
-	a.notify("已发送 " + label)
-	go func() {
-		if err := a.sess.SendToTransmitter("voice-tone", value, unit); err != nil {
-			a.notifyError(err.Error())
-			return
-		}
-		a.sess.Log("已设置 %s", label)
-	}()
+func (a *App) settingPending(id string, unit int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.pending[settingKey{id: id, unit: unit}]
 }
 
 // notify records a message for the view to show, since the work that produced
@@ -146,7 +171,7 @@ func (a *App) showNotice(c *ui.Context) {
 		return
 	}
 	if failed {
-		c.Toast("设置失败：" + message)
+		c.Toast("设置未完成：" + message)
 		return
 	}
 	c.Toast(message)

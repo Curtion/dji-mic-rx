@@ -22,8 +22,7 @@ type Options struct {
 	// connection is open. The receiver is a USB device: it appears, is
 	// unplugged and reboots, so the app watches rather than opens once.
 	PollInterval time.Duration
-	// AckTimeout is how long a command waits for the receiver's
-	// acknowledgement.
+	// AckTimeout bounds the wait for the device to report the requested value.
 	AckTimeout time.Duration
 	// OnChange is called whenever the snapshot changes. It may be called
 	// from any goroutine and should return quickly.
@@ -77,9 +76,9 @@ type Session struct {
 
 	mu       sync.Mutex
 	snapshot Snapshot
-	conn     *usb.Conn
+	conn     connection
 	seq      uint16
-	pending  map[uint16]chan struct{}
+	pending  map[uint16]*pendingSetting
 	frames   int
 	rate     float64
 	stop     chan struct{}
@@ -89,6 +88,20 @@ type Session struct {
 	// can be logged once rather than on every tick.
 	lastKind  stateKind
 	kindKnown bool
+}
+
+type pendingSetting struct {
+	id           string
+	value        string
+	unit         int
+	acknowledged bool
+	done         chan error
+}
+
+type connection interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	Close() error
 }
 
 // New returns a session that has not been started yet.
@@ -101,7 +114,7 @@ func New(opts Options) *Session {
 	}
 	s := &Session{
 		opts:    opts,
-		pending: map[uint16]chan struct{}{},
+		pending: map[uint16]*pendingSetting{},
 		stop:    make(chan struct{}),
 	}
 	s.snapshot = Snapshot{
@@ -148,6 +161,7 @@ func (s *Session) Snapshot() Snapshot {
 	defer s.mu.Unlock()
 	snap := s.snapshot
 	snap.Time = time.Now()
+	snap.State = s.snapshot.State.Clone()
 	snap.Log = append([]LogLine(nil), s.snapshot.Log...)
 	snap.InstallLog = append([]string(nil), s.snapshot.InstallLog...)
 	return snap
@@ -371,6 +385,10 @@ func (s *Session) close(why string) {
 	s.snapshot.Connected = false
 	s.snapshot.FramesPerSecond = 0
 	s.snapshot.ConnectionError = why
+	for seq, pending := range s.pending {
+		pending.done <- errors.New(why)
+		delete(s.pending, seq)
+	}
 	s.mu.Unlock()
 	if conn != nil {
 		conn.Close()
@@ -379,7 +397,7 @@ func (s *Session) close(why string) {
 }
 
 // read decodes the receiver's status stream until the connection fails.
-func (s *Session) read(conn *usb.Conn) {
+func (s *Session) read(conn connection) {
 	buf := make([]byte, 1024)
 	pending := make([]byte, 0, 2048)
 	reported := 0
@@ -419,12 +437,10 @@ func (s *Session) handleFrame(frame []byte, reported *int) {
 	case duml.KindAck:
 		if seq, ok := duml.AckSeq(frame); ok {
 			s.mu.Lock()
-			ch, waiting := s.pending[seq]
-			delete(s.pending, seq)
-			s.mu.Unlock()
-			if waiting {
-				close(ch)
+			if pending := s.pending[seq]; pending != nil {
+				pending.acknowledged = true
 			}
+			s.mu.Unlock()
 		}
 		return
 	case duml.KindPush:
@@ -438,6 +454,16 @@ func (s *Session) handleFrame(frame []byte, reported *int) {
 	if ok {
 		first := !s.snapshot.State.DialectKnown
 		s.snapshot.State = next
+		for seq, pending := range s.pending {
+			value := next.Setting(pending.id)
+			if pending.id == "voice-tone" && pending.unit > 0 {
+				value = next.TX[pending.unit-1].VoiceTone
+			}
+			if value == pending.value {
+				pending.done <- nil
+				delete(s.pending, seq)
+			}
+		}
 		s.snapshot.LastFrame = next.Updated
 		s.frames++
 		if first {
@@ -460,7 +486,7 @@ func (s *Session) handleFrame(frame []byte, reported *int) {
 	}
 }
 
-// Send writes a setting to the receiver and waits for its acknowledgement.
+// Send waits until the device reports the requested setting value.
 func (s *Session) Send(settingID, value string) error {
 	return s.send(settingID, value, 0)
 }
@@ -502,11 +528,8 @@ func (s *Session) send(settingID, value string, unit int) error {
 
 	s.seq++
 	seq := s.seq
-	ch := make(chan struct{})
-	s.pending[seq] = ch
-	// Show the new value at once; the next status frame confirms or
-	// corrects it.
-	s.snapshot.State.Settings[settingID] = value
+	pending := &pendingSetting{id: settingID, value: value, unit: unit, done: make(chan error, 1)}
+	s.pending[seq] = pending
 	s.mu.Unlock()
 
 	frame := duml.BuildCommand(state.Dialect, seq, target, command, wire)
@@ -518,13 +541,28 @@ func (s *Session) send(settingID, value string, unit int) error {
 	timer := time.NewTimer(s.opts.AckTimeout)
 	defer timer.Stop()
 	select {
-	case <-ch:
+	case err := <-pending.done:
+		if err != nil {
+			return err
+		}
 		s.Log("已设置 %s = %s", setting.Label, valueLabel(setting, value))
 		s.changed()
 		return nil
 	case <-timer.C:
-		s.forget(seq)
-		return fmt.Errorf("%s 没有在 %s 内确认", setting.Label, s.opts.AckTimeout)
+		s.mu.Lock()
+		select {
+		case err := <-pending.done:
+			s.mu.Unlock()
+			return err
+		default:
+		}
+		acknowledged := pending.acknowledged
+		delete(s.pending, seq)
+		s.mu.Unlock()
+		if acknowledged {
+			return fmt.Errorf("%s：设备已应答，但未在 %s 内回报目标值，请检查设备状态", setting.Label, s.opts.AckTimeout)
+		}
+		return fmt.Errorf("%s 没有在 %s 内确认，请检查设备连接和当前状态", setting.Label, s.opts.AckTimeout)
 	case <-s.stop:
 		s.forget(seq)
 		return errors.New("程序正在退出")
