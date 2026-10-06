@@ -86,6 +86,30 @@ func TestBatteryRowsFollowTheGauge(t *testing.T) {
 	}
 }
 
+// The settings page files its lists under the end of the link each one
+// configures: one card for the transmitters, one for the receiver itself.
+func TestSettingsPageFilesListsByDevice(t *testing.T) {
+	for _, kind := range []DemoKind{DemoLive, DemoV1, DemoMobile} {
+		t.Run(situationName(kind), func(t *testing.T) {
+			app := New(NewDemo(kind))
+			tester := ui.NewTester(app.View, 1180, 900)
+			tester.SetScale(1)
+			tester.SetDark(true)
+			tester.Frame()
+			if err := tester.Click("设置"); err != nil {
+				t.Fatalf("click 设置: %v", err)
+			}
+			tester.Frame()
+			tester.Frame()
+			for _, title := range []string{"发射器设置", "接收器设置"} {
+				if !tester.HasText(title) {
+					t.Errorf("settings page has no card titled %q", title)
+				}
+			}
+		})
+	}
+}
+
 // The panels of the status page rows must end on one line: a card that stops
 // short of its neighbours reads as a mistake, so the row stretches them to a
 // common height and the identity rows sit at its bottom.

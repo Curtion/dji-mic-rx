@@ -8,35 +8,39 @@ import (
 )
 
 // settingsPage shows the settings of the protocol the receiver speaks — and
-// only those. v1 and v2 get their own lists rather than one list with the
-// other version's gaps explained away; a receiver whose version is not known
-// yet gets a waiting card instead of a guess.
+// only those — in two lists, one per end of the link: what the receiver
+// applies to the transmitters as a group, and what belongs to the receiver
+// itself. v1 and v2 get their own lists rather than one list with the other
+// version's gaps explained away; a receiver whose version is not known yet
+// gets a waiting card instead of a guess.
 func (a *App) settingsPage(c *ui.Context, p palette, snap session.Snapshot) {
 	dialect, known := dialectOf(snap)
 	if !snap.Connected || !known {
 		a.waitingCard(c, p, snap)
 		return
 	}
-	for _, group := range []duml.Group{duml.GroupAudio, duml.GroupPower, duml.GroupDevice} {
-		list := settingsInGroup(dialect, a.product(snap), group)
-		if len(list) == 0 {
-			continue
-		}
-		a.settingsGroup(c, p, snap, group, list)
-	}
+	product := a.product(snap)
+	a.settingsSection(c, p, snap, "发射器设置", "对两支发射器一起生效", settingsFor(dialect, product, true))
+	a.settingsSection(c, p, snap, "接收器设置", "只对接收器本身生效", settingsFor(dialect, product, false))
 	if list := readOnlySettings(dialect); len(list) > 0 {
 		a.readOnlyGroup(c, p, snap, list)
 	}
 	a.handHeldCard(c, p, dialect)
 }
 
-// settingsInGroup returns the settings of one group this protocol can write,
-// in registry order. Per-transmitter settings live on the transmitter's card
-// and are never listed here.
-func settingsInGroup(dialect duml.Dialect, product string, group duml.Group) []duml.Setting {
+// settingsFor returns the writable settings of one end of the link this
+// protocol can change, in registry order: with transmitters true, the
+// settings the receiver applies to the transmitters as a group; with false,
+// the receiver's own. Per-transmitter settings live on the transmitter's
+// card on the status page and are never listed here.
+func settingsFor(dialect duml.Dialect, product string, transmitters bool) []duml.Setting {
 	var list []duml.Setting
 	for _, setting := range duml.Settings {
-		if setting.PerTransmitter || setting.Group != group {
+		if setting.PerTransmitter {
+			continue
+		}
+		toTransmitters := setting.Target == duml.TargetAllTX
+		if toTransmitters != transmitters {
 			continue
 		}
 		if !setting.Available(dialect, product) {
@@ -87,9 +91,14 @@ func (a *App) handHeldCard(c *ui.Context, p palette, dialect duml.Dialect) {
 	})
 }
 
-// settingsGroup draws one section of the list.
-func (a *App) settingsGroup(c *ui.Context, p palette, snap session.Snapshot, group duml.Group, settings []duml.Setting) {
-	card(c, p, string(group), "", func() {
+// settingsSection draws one end's settings as a card of its own: the two
+// lists are never mixed, so which device a row configures is read from the
+// card it sits in.
+func (a *App) settingsSection(c *ui.Context, p palette, snap session.Snapshot, title, detail string, settings []duml.Setting) {
+	if len(settings) == 0 {
+		return
+	}
+	card(c, p, title, detail, func() {
 		for i, setting := range settings {
 			if i > 0 {
 				hairline(c, p)

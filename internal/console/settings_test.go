@@ -7,25 +7,27 @@ import (
 	"dji-mic-rx/internal/duml"
 )
 
-// The settings page belongs to one protocol: a v1 receiver must not be shown
-// v2-only settings (with or without an explanation), and v2 must not carry
-// v1's read-only special cases.
+// The settings page belongs to one protocol and one end of the link: a v1
+// receiver must not be shown v2-only settings (with or without an
+// explanation), v2 must not carry v1's read-only special cases, and the
+// transmitters' settings and the receiver's go to separate cards.
 func TestSettingsSplitByProtocol(t *testing.T) {
-	wantV1 := []string{
-		"noise-cancel", "low-cut", "stereo", "safety-track", "clip-limiter",
-		"auto-off-15m", "camera-power", "mic-leds", "plug-free",
-	}
-	wantV2 := []string{
-		"noise-cancel", "noise-cancel-power", "noise-cancel-button", "low-cut",
-		"stereo", "safety-track", "clip-limiter", "auto-off-15m",
-		"tx-auto-off-15m", "camera-power", "mic-leds", "plug-free",
-	}
+	wantV1TX := []string{"noise-cancel", "low-cut", "mic-leds"}
+	wantV1RX := []string{"stereo", "safety-track", "clip-limiter", "auto-off-15m", "camera-power", "plug-free"}
+	wantV2TX := []string{"noise-cancel", "noise-cancel-power", "noise-cancel-button", "low-cut", "tx-auto-off-15m", "mic-leds"}
+	wantV2RX := wantV1RX
 
-	if got := writableIDs(duml.V1, "DJI Mic Mini 2"); !slices.Equal(got, wantV1) {
-		t.Errorf("v1 settings = %v, want %v", got, wantV1)
+	if got := writableIDs(duml.V1, "DJI Mic Mini 2", true); !slices.Equal(got, wantV1TX) {
+		t.Errorf("v1 transmitter settings = %v, want %v", got, wantV1TX)
 	}
-	if got := writableIDs(duml.V2, "DJI Mic Mini 2"); !slices.Equal(got, wantV2) {
-		t.Errorf("v2 settings = %v, want %v", got, wantV2)
+	if got := writableIDs(duml.V1, "DJI Mic Mini 2", false); !slices.Equal(got, wantV1RX) {
+		t.Errorf("v1 receiver settings = %v, want %v", got, wantV1RX)
+	}
+	if got := writableIDs(duml.V2, "DJI Mic Mini 2", true); !slices.Equal(got, wantV2TX) {
+		t.Errorf("v2 transmitter settings = %v, want %v", got, wantV2TX)
+	}
+	if got := writableIDs(duml.V2, "DJI Mic Mini 2", false); !slices.Equal(got, wantV2RX) {
+		t.Errorf("v2 receiver settings = %v, want %v", got, wantV2RX)
 	}
 
 	// The states v1 reports without a command go to the read-only card
@@ -38,14 +40,13 @@ func TestSettingsSplitByProtocol(t *testing.T) {
 	}
 }
 
-// writableIDs lists the settings the settings page would draw, in the page's
-// order: group by group, registry order inside.
-func writableIDs(dialect duml.Dialect, product string) []string {
+// writableIDs lists the settings one card of the settings page would draw,
+// in the page's order: the transmitters' list or the receiver's, in registry
+// order inside.
+func writableIDs(dialect duml.Dialect, product string, transmitters bool) []string {
 	var ids []string
-	for _, group := range []duml.Group{duml.GroupAudio, duml.GroupPower, duml.GroupDevice} {
-		for _, setting := range settingsInGroup(dialect, product, group) {
-			ids = append(ids, setting.ID)
-		}
+	for _, setting := range settingsFor(dialect, product, transmitters) {
+		ids = append(ids, setting.ID)
 	}
 	return ids
 }
