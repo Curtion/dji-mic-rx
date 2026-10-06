@@ -7,38 +7,57 @@ import (
 	"dji-mic-rx/internal/session"
 )
 
-// settingsPage shows one group of settings. Every row is built from the
-// setting registry, so a control exists exactly when the receiver has a
-// command for it, and says why when it does not.
-func (a *App) settingsPage(c *ui.Context, p palette, snap session.Snapshot, group duml.Group) {
-	settings := make([]duml.Setting, 0, len(duml.Settings))
-	for _, s := range duml.Settings {
-		if s.Group == group && !s.PerTransmitter {
-			settings = append(settings, s)
-		}
-	}
-
-	card(c, p, string(group), groupDetail(group), func() {
-		if !snap.Connected {
+// settingsPage shows every shared setting in one list, grouped by what it
+// affects. Every row is built from the setting registry, so a control exists
+// exactly when the receiver has a command for it, and says why when it does
+// not.
+func (a *App) settingsPage(c *ui.Context, p palette, snap session.Snapshot) {
+	if !snap.Connected {
+		card(c, p, "", "", func() {
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, iconInfo).FontSize(13).TextColor(p.inkFaint)
 				ui.Text(c, "接收器未连接，设置暂时只能查看。").
 					FontSize(sizeLabel).TextColor(p.inkFaint)
 			})
-		}
-		for i, setting := range settings {
-			if i > 0 {
+		})
+	}
+	for _, group := range []duml.Group{duml.GroupAudio, duml.GroupPower, duml.GroupDevice} {
+		a.settingsGroup(c, p, snap, group)
+	}
+
+	card(c, p, "可以在硬件上直接操作的事", "有些功能不需要这个程序", func() {
+		ui.Column(c).Gap(8).Children(func() {
+			for _, line := range []string{
+				"增益：转动接收器左上侧的拨轮，五档、每档 6 dB；程序只能读出当前位置。",
+				"单声道/立体声：双击接收器的配对键即可切换。",
+				"配对：发射器与接收器都长按配对键两秒。",
+			} {
+				ui.Row(c).Gap(10).AlignItems(ui.Start).Children(func() {
+					ui.Box(c).Width(4).Height(4).Radius(2).Background(p.signal).
+						Margin(4, 0, 0, 0)
+					ui.Text(c, line).FontSize(sizeLabel).TextColor(p.inkDim).Grow(1).
+						LineHeight(1.5)
+				})
+			}
+		})
+	})
+}
+
+// settingsGroup draws one section of the list.
+func (a *App) settingsGroup(c *ui.Context, p palette, snap session.Snapshot, group duml.Group) {
+	card(c, p, string(group), "", func() {
+		first := true
+		for _, setting := range duml.Settings {
+			if setting.Group != group || setting.PerTransmitter {
+				continue
+			}
+			if !first {
 				hairline(c, p)
 			}
+			first = false
 			a.settingRow(c, p, snap, setting)
 		}
 	})
-
-	if note := groupNote(group); note != "" {
-		card(c, p, "说明", "", func() {
-			ui.Text(c, note).FontSize(sizeLabel).TextColor(p.inkDim).LineHeight(1.5)
-		})
-	}
 }
 
 // settingRow draws one setting: its name, what it does, and the control that
@@ -51,14 +70,9 @@ func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, settin
 		dialect = duml.V1
 	}
 	value := snap.State.Setting(setting.ID)
-	available := setting.Available(dialect, a.product(snap))
 
-	if !available {
+	if !setting.Available(dialect, a.product(snap)) {
 		fieldRow(c, p, setting.Label, setting.Detail, func() {
-			if setting.Kind == duml.KindToggle {
-				unavailableNote(c, p, unavailableReason(setting, dialect))
-				return
-			}
 			unavailableNote(c, p, unavailableReason(setting, dialect))
 		})
 		return
@@ -82,20 +96,12 @@ func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, settin
 			// The switch joins the row it is built in, so it has to be
 			// created here rather than before the row.
 			reply := ui.Switch(c, &on).Label(setting.Label).Disabled(!snap.Connected)
-			if setting.Reboots {
-				ui.Icon(c, iconWarning).FontSize(13).TextColor(p.signal).
-					Tooltip("更改后接收器会重启")
-			}
 			if !reply.Changed() {
 				return
 			}
 			next := setting.Off
 			if on {
 				next = setting.On
-			}
-			if setting.Reboots {
-				a.ask = confirm{kind: confirmReboot, setting: setting.ID, value: next}
-				return
 			}
 			a.setSetting(c, setting.ID, next)
 		})
@@ -131,29 +137,4 @@ func unavailableReason(setting duml.Setting, dialect duml.Dialect) string {
 		return "只有 " + setting.RequiresProduct + " 支持"
 	}
 	return "当前固件不支持"
-}
-
-// groupDetail is the one line under a group's title.
-func groupDetail(group duml.Group) string {
-	switch group {
-	case duml.GroupAudio:
-		return "收音与降噪"
-	case duml.GroupPower:
-		return "省电与联动"
-	default:
-		return "硬件行为"
-	}
-}
-
-// groupNote is the extra explanation a group needs, written where a person
-// will meet the setting rather than in a manual.
-func groupNote(group duml.Group) string {
-	switch group {
-	case duml.GroupAudio:
-		return "立体声与安全音轨共用第二声道，打开一个会让接收器关掉另一个。"
-	case duml.GroupPower:
-		return "自动关机在 15 分钟无操作后触发；「跟随相机开关机」只对相机有效，USB 供电时不受影响。"
-	default:
-		return "关闭发射器指示灯后，录制时发射器不再亮灯；「免拔插外放」改动后接收器会重启，状态需要几秒才能回来。"
-	}
 }

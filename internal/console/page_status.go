@@ -2,8 +2,6 @@ package console
 
 import (
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -12,14 +10,22 @@ import (
 )
 
 // statusPage is what the window is for: is the microphone on, how loud is it,
-// how much charge is left, and what is it set to.
+// and how much charge is left.
 func (a *App) statusPage(c *ui.Context, p palette, snap session.Snapshot) {
+	if !snap.Connected && snap.ConnectionError != "" {
+		card(c, p, "还没有状态", "", func() {
+			ui.Row(c).Gap(8).AlignItems(ui.Start).Children(func() {
+				ui.Icon(c, iconWarning).FontSize(14).TextColor(p.signal)
+				ui.Text(c, snap.ConnectionError).FontSize(sizeLabel).
+					TextColor(p.inkDim).Grow(1).LineHeight(1.45)
+			})
+		})
+	}
 	ui.Row(c).Gap(16).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Grow(1).Children(func() { a.receiverCard(c, p, snap) })
 		ui.Column(c).Grow(1).Children(func() { a.transmitterCard(c, p, snap, 0) })
 		ui.Column(c).Grow(1).Children(func() { a.transmitterCard(c, p, snap, 1) })
 	})
-	a.streamCard(c, p, snap)
 }
 
 // receiverCard shows the receiver: the link, the gain dial's position, its
@@ -96,7 +102,7 @@ func (a *App) transmitterCard(c *ui.Context, p palette, snap session.Snapshot, i
 	tx := snap.State.TX[index]
 	title := fmt.Sprintf("发射器 %d", index+1)
 	card(c, p, title, "别在衣领上的那支", func() {
-		a.linkLine(c, p, tx.Present, transmitterName(tx))
+		a.linkLine(c, p, tx.Present, tx.Name)
 
 		pct, batteryKnown := tx.BatteryPercent()
 		if batteryKnown {
@@ -115,9 +121,6 @@ func (a *App) transmitterCard(c *ui.Context, p palette, snap session.Snapshot, i
 				ui.Text(c, condition(tx.Present, "电量未知", "未连接")).FontSize(sizeValue).
 					TextColor(p.inkDim)
 			})
-		}
-		if tx.Present {
-			ui.Text(c, "v1 固件不上报发射器电量，指示灯会显示红/绿。").FontSize(sizeUnit).TextColor(p.inkFaint).LineHeight(1.4)
 		}
 
 		hairline(c, p)
@@ -150,7 +153,7 @@ func (a *App) levelRow(c *ui.Context, p palette, snap session.Snapshot, index in
 			ui.Text(c, levelText(tx, known)).FontSize(sizeValue).TextColor(p.ink).
 				FontFeatures(tabular)
 		})
-		levelLadder(c, p, fraction, a.peak[index], known)
+		levelLadder(c, p, fraction, known)
 		if !tx.Present {
 			ui.Text(c, "发射器未连接：长按它的电源键开机，指示灯转绿后即连上。").FontSize(sizeUnit).TextColor(p.inkFaint).LineHeight(1.4)
 		}
@@ -207,32 +210,6 @@ func (a *App) linkLine(c *ui.Context, p palette, connected bool, name string) {
 	})
 }
 
-// streamCard reports the status stream itself, which is what a person needs
-// when the window stays empty: the app reads the receiver rather than asking
-// it questions, so a silent device is a real symptom.
-func (a *App) streamCard(c *ui.Context, p palette, snap session.Snapshot) {
-	card(c, p, "状态流", "设备主动推送，无需轮询", func() {
-		ui.Row(c).Gap(24).AlignItems(ui.Start).Children(func() {
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				specRow(c, p, "协议版本", dialectText(snap), false)
-				specRow(c, p, "推送频率", fmt.Sprintf("%.1f 帧/秒", snap.FramesPerSecond), true)
-			})
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				specRow(c, p, "最近一帧", ageText(snap), true)
-				specRow(c, p, "已解码帧数", fmt.Sprintf("%d", snap.State.Packets), true)
-			})
-		})
-		if !snap.Connected && snap.ConnectionError != "" {
-			hairline(c, p)
-			ui.Row(c).Gap(8).AlignItems(ui.Start).Children(func() {
-				ui.Icon(c, iconWarning).FontSize(14).TextColor(p.signal)
-				ui.Text(c, snap.ConnectionError).FontSize(sizeLabel).
-					TextColor(p.inkDim).Grow(1).LineHeight(1.45)
-			})
-		}
-	})
-}
-
 // deviceName is what to call the receiver: its own product name once the
 // identity push has arrived, otherwise the family the USB ids matched.
 func (a *App) deviceName(snap session.Snapshot) string {
@@ -241,13 +218,6 @@ func (a *App) deviceName(snap session.Snapshot) string {
 	}
 	if snap.State.DialectKnown {
 		return snap.State.Dialect.String() + " 固件"
-	}
-	return ""
-}
-
-func transmitterName(tx duml.TXInfo) string {
-	if tx.Name != "" {
-		return tx.Name
 	}
 	return ""
 }
@@ -269,28 +239,6 @@ func levelText(tx duml.TXInfo, known bool) string {
 		return "—"
 	}
 	return fmt.Sprintf("%d", tx.Level)
-}
-
-func dialectText(snap session.Snapshot) string {
-	if !snap.State.DialectKnown {
-		return "未知"
-	}
-	return "v" + strings.TrimPrefix(snap.State.Dialect.String(), "v") + " 固件"
-}
-
-func ageText(snap session.Snapshot) string {
-	if snap.LastFrame.IsZero() {
-		return "—"
-	}
-	age := snap.Time.Sub(snap.LastFrame)
-	switch {
-	case age < time.Second:
-		return fmt.Sprintf("%d 毫秒前", age.Milliseconds())
-	case age < time.Minute:
-		return fmt.Sprintf("%d 秒前", int(age.Seconds()))
-	default:
-		return fmt.Sprintf("%d 分钟前", int(age.Minutes()))
-	}
 }
 
 func blank(s string) string {

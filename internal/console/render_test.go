@@ -51,7 +51,7 @@ func renderLadder(t *testing.T, fraction float64) (lit, steps int) {
 		th, p := theme(c.Theme())
 		c.SetTheme(th)
 		ui.Column(c).Padding(10).Children(func() {
-			levelLadder(c, p, fraction, 0, true)
+			levelLadder(c, p, fraction, true)
 		})
 	}, 600, 60)
 	tester.SetScale(1)

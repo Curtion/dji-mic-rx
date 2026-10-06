@@ -5,7 +5,6 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"dji-mic-rx/internal/duml"
 	"dji-mic-rx/internal/session"
 )
 
@@ -17,34 +16,12 @@ func (a *App) View(c *ui.Context) {
 	c.SetTheme(theme)
 
 	snap := a.snapshot()
-	a.updatePeaks(snap)
-	a.handleShortcuts(c, snap)
 	a.showNotice(c)
 
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Background(p.chassis).Children(func() {
 		a.rail(c, p, snap)
 		a.content(c, p, snap)
 	})
-	a.dialogs(c, p)
-}
-
-// handleShortcuts wires the keyboard: number keys for the pages, plus a
-// rescan and a copy of the diagnostics.
-func (a *App) handleShortcuts(c *ui.Context, snap session.Snapshot) {
-	for i := range pages {
-		key := []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6}[i]
-		if c.Shortcut(ui.Cmd, key) {
-			a.page = i
-		}
-	}
-	if c.Shortcut(ui.Cmd, ui.KeyR) {
-		a.sess.Rescan()
-		a.sess.Log("手动重新检测设备")
-		c.Toast("正在重新检测接收器")
-	}
-	if c.Shortcut(ui.Cmd|ui.Shift, ui.KeyD) {
-		a.copyDiagnostics(c)
-	}
 }
 
 // rail is the left column: what this app is, where you can go, and whether the
@@ -53,7 +30,7 @@ func (a *App) rail(c *ui.Context, p palette, snap session.Snapshot) {
 	ui.Column(c).Width(232).FillHeight().Padding(16, 14).Gap(18).
 		Background(p.panel).BorderWidth(0, 1, 0, 0).BorderColor(p.line).
 		Children(func() {
-			a.brand(c, p, snap)
+			a.brand(c, p)
 			a.nav(c, p)
 			ui.Spacer(c)
 			a.linkStatus(c, p, snap)
@@ -61,7 +38,7 @@ func (a *App) rail(c *ui.Context, p palette, snap session.Snapshot) {
 }
 
 // brand is the app's name, with the tool's own indicator light beside it.
-func (a *App) brand(c *ui.Context, p palette, snap session.Snapshot) {
+func (a *App) brand(c *ui.Context, p palette) {
 	ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, iconReceiver).FontSize(26).TextColor(p.signal)
 		ui.Column(c).Gap(1).Children(func() {
@@ -96,9 +73,6 @@ func (a *App) nav(c *ui.Context, p palette) {
 				}
 				ui.Icon(c, pg.icon).FontSize(17).TextColor(iconColor)
 				ui.Text(c, pg.label).FontSize(sizeBody).TextColor(labelColor).Grow(1).SingleLine()
-				if a.showKeys {
-					keyHint(c, p, itoa(i+1))
-				}
 			})
 			if item.Clicked() {
 				a.page = i
@@ -107,17 +81,13 @@ func (a *App) nav(c *ui.Context, p palette) {
 	})
 }
 
-// linkStatus is the rail's footer: the activity light, the push rate, and —
-// when something is wrong — what to do about it.
+// linkStatus is the rail's footer: whether the status stream is alive, and a
+// way to look for the receiver again.
 func (a *App) linkStatus(c *ui.Context, p palette, snap session.Snapshot) {
 	ui.Column(c).Gap(8).Children(func() {
 		hairline(c, p)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			// The light burns while status frames arrive and dims between
-			// them, so the window shows the stream is alive.
-			level := a.pulse(snap)
-			color := p.link.Alpha(level)
-			ledDot(c, color, snap.Connected, 8)
+			ledDot(c, p.link, snap.Connected, 8)
 			ui.Text(c, a.rateText(snap)).FontSize(sizeUnit).TextColor(p.inkDim).
 				FontFeatures(tabular).SingleLine()
 			ui.Spacer(c)
@@ -125,8 +95,8 @@ func (a *App) linkStatus(c *ui.Context, p palette, snap session.Snapshot) {
 				pill(c, p, "协议 "+snap.State.Dialect.String(), p.inkDim)
 			}
 		})
-		if message := a.linkMessage(snap); message != "" {
-			ui.Text(c, message).FontSize(sizeUnit).TextColor(p.inkDim).LineHeight(1.4)
+		if !snap.Connected && snap.ConnectionError != "" {
+			ui.Text(c, snap.ConnectionError).FontSize(sizeUnit).TextColor(p.inkDim).LineHeight(1.4)
 		}
 		action := ui.Row(c).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer)
 		action.Children(func() {
@@ -153,14 +123,6 @@ func (a *App) rateText(snap session.Snapshot) string {
 	}
 }
 
-// linkMessage is the rail's explanation of a link that is not up.
-func (a *App) linkMessage(snap session.Snapshot) string {
-	if snap.Connected {
-		return ""
-	}
-	return snap.ConnectionError
-}
-
 // content is the page column: its header, then the page itself.
 func (a *App) content(c *ui.Context, p palette, snap session.Snapshot) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
@@ -171,16 +133,10 @@ func (a *App) content(c *ui.Context, p palette, snap session.Snapshot) {
 				switch pages[a.page].id {
 				case "status":
 					a.statusPage(c, p, snap)
-				case "audio":
-					a.settingsPage(c, p, snap, duml.GroupAudio)
-				case "power":
-					a.settingsPage(c, p, snap, duml.GroupPower)
-				case "device":
-					a.devicePage(c, p, snap)
+				case "settings":
+					a.settingsPage(c, p, snap)
 				case "driver":
 					a.driverPage(c, p, snap)
-				case "about":
-					a.aboutPage(c, p, snap)
 				}
 			})
 		})
@@ -206,49 +162,41 @@ func (a *App) header(c *ui.Context, p palette, snap session.Snapshot) {
 		}
 		pill(c, p, linkText, link)
 
-		driver, driverText, driverColor := driverBadge(snap, p)
+		text, color, ready := driverBadge(snap, p)
 		badge := ui.Row(c).Cursor(ui.CursorPointer).Children(func() {
-			pill(c, p, driverText, driverColor)
+			pill(c, p, text, color)
 		})
-		if badge.Clicked() && driver != "ready" {
+		if badge.Clicked() && !ready {
 			a.ShowPage("driver")
 		}
-		_ = driver
 	})
 }
 
 // driverBadge summarises the driver's state in one phrase.
-func driverBadge(snap session.Snapshot, p palette) (state, text string, color ui.Color) {
+func driverBadge(snap session.Snapshot, p palette) (text string, color ui.Color, ready bool) {
 	if !snap.HaveModel {
 		if len(snap.Status.UnknownDevices()) > 0 {
-			return "unknown", "型号不在表里", p.signal
+			return "型号不在表里", p.signal, false
 		}
-		return "missing", "未检测到设备", p.inkFaint
+		return "未检测到设备", p.inkFaint, false
 	}
 	if snap.Status.Ready() {
-		return "ready", "WinUSB 就绪", p.link
+		return "WinUSB 就绪", p.link, true
 	}
 	if snap.Status.Control != nil && snap.Status.Control.Present {
-		return "nodriver", "接口未绑定驱动", p.alarm
+		return "接口未绑定驱动", p.alarm, false
 	}
-	return "nointerface", "厂商接口未出现", p.signal
+	return "厂商接口未出现", p.signal, false
 }
 
-// subtitle is the page's one line of context, written from what the app knows
-// rather than from a fixed string.
+// subtitle is the page's one line of context.
 func (p page) subtitle() string {
 	switch p.id {
 	case "status":
 		return "接收器与两支发射器的实时状态，由设备以约 10 次/秒主动推送"
-	case "audio":
-		return "降噪、低切与声道设置，写回接收器后立即生效"
-	case "power":
-		return "自动关机与随相机开机的行为"
-	case "device":
-		return "指示灯、外放与设备身份信息"
-	case "driver":
-		return "只给厂商接口安装 WinUSB，录音与按键接口保持系统驱动"
+	case "settings":
+		return "写回接收器后立即生效；v1 固件没有的设置会写明原因"
 	default:
-		return "非官方工具，协议来自社区逆向"
+		return "只给厂商接口安装 WinUSB，录音与按键接口保持系统驱动"
 	}
 }

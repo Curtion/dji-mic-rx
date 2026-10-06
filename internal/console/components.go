@@ -18,14 +18,9 @@ func hairline(c *ui.Context, p palette) {
 func ledDot(c *ui.Context, color ui.Color, lit bool, size float32) *ui.Element {
 	dot := ui.Box(c).Size(size, size).Radius(size)
 	if !lit {
-		return dot.Background(dim(color, 0.22))
+		return dot.Background(color.Alpha(0.22))
 	}
 	return dot.Background(color)
-}
-
-// dim fades a colour, for the unlit state of a light that is off.
-func dim(color ui.Color, amount float32) ui.Color {
-	return color.Alpha(amount)
 }
 
 // pill is a short status label: a word in the colour of the state it names,
@@ -68,32 +63,21 @@ func batteryGlyph(c *ui.Context, p palette, pct int, known bool, charging bool) 
 	})
 }
 
-// levelBands are the three colours a level ladder lights up in, in the order
-// they appear along it: quiet, loud, and too loud.
-func levelBands(p palette) [3]ui.Color {
-	return [3]ui.Color{p.link, p.signal, p.alarm}
-}
-
 // ladderSegments is how many steps the ladder is drawn in. Twenty-odd steps
 // read as a meter rather than a progress bar, which is what this is.
 const ladderSegments = 24
 
-// levelLadder draws the live audio level as a segmented ladder with a peak
-// hold, the loudest element in the window because it is the only one that
-// moves on its own.
+// levelLadder draws the live audio level as a segmented ladder, the loudest
+// element in the window because it is the only one that moves on its own.
 //
 // The level is in the device's own units, so the ladder is scaled to the
 // range the receiver reports rather than pretending to be dBFS; the number
 // beside it is the raw reading.
-func levelLadder(c *ui.Context, p palette, fraction, peak float64, live bool) *ui.Element {
-	bands := levelBands(p)
+func levelLadder(c *ui.Context, p palette, fraction float64, live bool) *ui.Element {
+	bands := [3]ui.Color{p.link, p.signal, p.alarm}
 	lit := 0
 	if live {
 		lit = ladderLit(fraction)
-	}
-	peakStep := -1
-	if live && peak > 0 {
-		peakStep = int(math.Round(peak * float64(ladderSegments)))
 	}
 	return ui.Row(c).Gap(2).Children(func() {
 		for i := 0; i < ladderSegments; i++ {
@@ -105,12 +89,8 @@ func levelLadder(c *ui.Context, p palette, fraction, peak float64, live bool) *u
 				band = 1
 			}
 			color := p.track
-			switch {
-			case i < lit:
+			if i < lit {
 				color = bands[band]
-			case i == peakStep-1:
-				// The peak marker: a single step held at its loudest.
-				color = bands[band].Mix(p.ink, 0.5)
 			}
 			ui.Box(c).Width(5).Height(12).Radius(1.5).Background(color)
 		}
@@ -191,8 +171,8 @@ func unavailableNote(c *ui.Context, p palette, reason string) *ui.Element {
 }
 
 // metric is a hero readout: a large tabular number with its unit beside it and
-// a small label under it. It is used for the two values worth reading from
-// across a room — the gain dial's position and a battery's charge.
+// a small label under it. It is used for the gain dial's position, the one
+// value worth reading from across a room.
 func metric(c *ui.Context, p palette, value, unit, label string, color ui.Color) *ui.Element {
 	return ui.Column(c).Gap(2).Children(func() {
 		ui.Row(c).Gap(4).AlignItems(ui.End).Children(func() {
@@ -205,12 +185,6 @@ func metric(c *ui.Context, p palette, value, unit, label string, color ui.Color)
 		})
 		ui.Text(c, label).FontSize(sizeUnit).TextColor(p.inkFaint).SingleLine()
 	})
-}
-
-// keyHint renders the keyboard shortcut beside a page title, as a small
-// caption rather than a badge.
-func keyHint(c *ui.Context, p palette, text string) *ui.Element {
-	return ui.Text(c, text).FontSize(sizeUnit).TextColor(p.inkFaint).SingleLine()
 }
 
 // percentText renders a battery reading.

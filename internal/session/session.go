@@ -7,8 +7,6 @@ package session
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -34,9 +32,8 @@ type Options struct {
 
 // LogLine is one entry of the session's activity log.
 type LogLine struct {
-	At    time.Time
-	Text  string
-	Error bool
+	At   time.Time
+	Text string
 }
 
 // Snapshot is everything the window draws from.
@@ -65,8 +62,6 @@ type Snapshot struct {
 	// ConnectionError explains why the receiver is not connected, when it
 	// is not: no driver, the interface missing, or an open failure.
 	ConnectionError string
-	// Notes are diagnostics from opening the device.
-	Notes []string
 
 	// Log is the recent activity log, newest last.
 	Log []LogLine
@@ -74,37 +69,6 @@ type Snapshot struct {
 	Installing bool
 	// InstallLog is the output of the running or last install.
 	InstallLog []string
-	// DriverLogPath is the file the last install wrote its output to, which
-	// is what to read when an install failed.
-	DriverLogPath string
-	// UnsignedRefused is true when Windows refused the driver package for
-	// want of a signature, which needs the user's help: an unsigned package
-	// cannot be installed by this app on such a machine.
-	UnsignedRefused bool
-	// ActivityLogPath is the file the activity log is copied to.
-	ActivityLogPath string
-	// Tools reports which optional helper programs the app found.
-	Tools Tools
-}
-
-// Tools reports the helper programs found on this machine. wdi-simple.exe is
-// libwdi's command line installer, whose packages Windows accepts without
-// further work; Zadig is its graphical counterpart. SDKTools is true when the
-// Windows SDK's makecat and signtool are present, which is what lets the app
-// sign a package it writes itself.
-type Tools struct {
-	WdiSimple    string
-	WdiSimpleSet bool
-	Zadig        string
-	ZadigSet     bool
-	Elevated     bool
-	// SignedPackage is true when this build carries a driver package signed
-	// at build time, which is the route that asks nothing of the user beyond
-	// the administrator prompt.
-	SignedPackage bool
-	// SDKTools is true when the Windows SDK's makecat and signtool are here,
-	// which is what the developer route signs with.
-	SDKTools bool
 }
 
 // Session watches one receiver.
@@ -120,13 +84,6 @@ type Session struct {
 	rate     float64
 	stop     chan struct{}
 	stopped  bool
-	tools    Tools
-
-	// configPath remembers a helper program the user picked.
-	configPath string
-	// dataDir is where logs are kept; empty means the system's temp
-	// directory.
-	dataDir string
 
 	// lastKind is the device-tree state the previous scan found, so a change
 	// can be logged once rather than on every tick.
@@ -151,7 +108,6 @@ func New(opts Options) *Session {
 		Time:  time.Now(),
 		State: duml.NewState(),
 	}
-	s.snapshot.Log = nil
 	return s
 }
 
@@ -163,18 +119,8 @@ func (s *Session) SetOnChange(fn func()) {
 	s.mu.Unlock()
 }
 
-// SetConfigPath tells the session where to remember a chosen helper program,
-// and where to keep the logs it writes.
-func (s *Session) SetConfigPath(path string) {
-	s.mu.Lock()
-	s.configPath = path
-	s.dataDir = filepath.Dir(path)
-	s.mu.Unlock()
-}
-
 // Start begins watching the device in the background.
 func (s *Session) Start() {
-	s.refreshTools()
 	go s.watch()
 	go s.measureRate()
 }
@@ -203,7 +149,6 @@ func (s *Session) Snapshot() Snapshot {
 	snap := s.snapshot
 	snap.Time = time.Now()
 	snap.Log = append([]LogLine(nil), s.snapshot.Log...)
-	snap.Notes = append([]string(nil), s.snapshot.Notes...)
 	snap.InstallLog = append([]string(nil), s.snapshot.InstallLog...)
 	return snap
 }
@@ -213,58 +158,18 @@ func (s *Session) Rescan() {
 	go s.tick()
 }
 
-// Log appends a line to the activity log, which the driver page shows.
+// Log appends a line to the activity log, which the diagnostics report
+// includes.
 func (s *Session) Log(format string, a ...any) {
-	s.logf(false, format, a...)
-}
-
-// logf appends a line, marking failures so the UI can colour them. The same
-// line goes to the activity log file, so a report can be sent without the
-// window having to be open at the time.
-func (s *Session) logf(isError bool, format string, a ...any) {
-	line := LogLine{At: time.Now(), Text: fmt.Sprintf(format, a...), Error: isError}
+	line := LogLine{At: time.Now(), Text: fmt.Sprintf(format, a...)}
 	s.mu.Lock()
 	log := append(s.snapshot.Log, line)
 	if len(log) > 200 {
 		log = log[len(log)-200:]
 	}
 	s.snapshot.Log = log
-	path := s.activityPath()
 	s.mu.Unlock()
-	s.appendLogFile(path, line)
 	s.changed()
-}
-
-// activityPath is the file the activity log is mirrored to, created on first
-// use.
-func (s *Session) activityPath() string {
-	if s.snapshot.ActivityLogPath != "" {
-		return s.snapshot.ActivityLogPath
-	}
-	dir := s.dataDir
-	if dir == "" {
-		dir = os.TempDir()
-	} else {
-		dir = filepath.Join(dir, "logs")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		s.snapshot.ActivityLogPath = ""
-		return ""
-	}
-	s.snapshot.ActivityLogPath = filepath.Join(dir, "activity.log")
-	return s.snapshot.ActivityLogPath
-}
-
-func (s *Session) appendLogFile(path string, line LogLine) {
-	if path == "" {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s  %s\n", line.At.Format("2006-01-02 15:04:05"), line.Text)
 }
 
 func (s *Session) changed() {
@@ -300,7 +205,7 @@ func (s *Session) measureRate() {
 		case <-ticker.C:
 			s.mu.Lock()
 			now := s.frames
-			s.rate = float64(now-last) * 1.0
+			s.rate = float64(now - last)
 			last = now
 			s.snapshot.FramesPerSecond = s.rate
 			s.mu.Unlock()
@@ -338,7 +243,7 @@ func (s *Session) tick() {
 	s.mu.Unlock()
 
 	if changed && kind != stateReady {
-		s.logf(false, "%s", transition(kind))
+		s.Log("%s", transition(kind))
 	}
 
 	switch {
@@ -434,7 +339,7 @@ func (s *Session) open(status usb.Status, model duml.Model) {
 	}
 	conn, err := usb.Open(*control)
 	if err != nil {
-		s.logf(true, "打开接收器失败：%v", err)
+		s.Log("打开接收器失败：%v", err)
 		s.mu.Lock()
 		s.snapshot.ConnectionError = "打开厂商接口失败：" + err.Error()
 		s.mu.Unlock()
@@ -447,13 +352,12 @@ func (s *Session) open(status usb.Status, model duml.Model) {
 	s.snapshot.Connected = true
 	s.snapshot.ConnectionError = ""
 	s.snapshot.State = duml.NewState()
-	s.snapshot.Notes = conn.Notes()
 	s.mu.Unlock()
 
-	s.logf(false, "已连接接收器（%s，接口 %d，端点 0x%02x/0x%02x）",
+	s.Log("已连接接收器（%s，接口 %d，端点 0x%02x/0x%02x）",
 		model.Name, model.Interface, model.BulkOut, model.BulkIn)
 	for _, note := range conn.Notes() {
-		s.logf(false, "  %s", note)
+		s.Log("  %s", note)
 	}
 	s.changed()
 	go s.read(conn)
@@ -471,7 +375,7 @@ func (s *Session) close(why string) {
 	if conn != nil {
 		conn.Close()
 	}
-	s.logf(false, "%s", why)
+	s.Log("%s", why)
 }
 
 // read decodes the receiver's status stream until the connection fails.
@@ -538,7 +442,7 @@ func (s *Session) handleFrame(frame []byte, reported *int) {
 		s.frames++
 		if first {
 			s.mu.Unlock()
-			s.logf(false, "协议版本 %s，状态推送已开始", next.Dialect)
+			s.Log("协议版本 %s，状态推送已开始", next.Dialect)
 			s.changed()
 			return
 		}
@@ -552,7 +456,7 @@ func (s *Session) handleFrame(frame []byte, reported *int) {
 	// mean a firmware that speaks a newer protocol.
 	if *reported < 3 {
 		*reported++
-		s.logf(false, "未识别的数据帧（%d 字节）：% x", len(frame), frame)
+		s.Log("未识别的数据帧（%d 字节）：% x", len(frame), frame)
 	}
 }
 
@@ -615,7 +519,7 @@ func (s *Session) send(settingID, value string, unit int) error {
 	defer timer.Stop()
 	select {
 	case <-ch:
-		s.logf(false, "已设置 %s = %s", setting.Label, valueLabel(setting, value))
+		s.Log("已设置 %s = %s", setting.Label, valueLabel(setting, value))
 		s.changed()
 		return nil
 	case <-timer.C:
@@ -641,12 +545,11 @@ func valueLabel(setting duml.Setting, value string) string {
 	return value
 }
 
-// Install installs the WinUSB driver on the control interface, prompting for
-// administrator rights. progress receives the installer's output as it runs.
+// Install installs the build's signed driver package on the control
+// interface, prompting for administrator rights. progress receives the
+// installer's output as it runs.
 func (s *Session) Install(progress func(string)) error {
 	s.mu.Lock()
-	model := s.snapshot.Model
-	haveModel := s.snapshot.HaveModel
 	s.snapshot.Installing = true
 	s.snapshot.InstallLog = nil
 	s.mu.Unlock()
@@ -659,12 +562,6 @@ func (s *Session) Install(progress func(string)) error {
 		s.changed()
 	}()
 
-	if !haveModel {
-		err := errors.New("请先插上接收器：驱动要绑定的是它的厂商接口")
-		s.logf(true, "%v", err)
-		return err
-	}
-
 	emit := func(line string) {
 		s.mu.Lock()
 		s.snapshot.InstallLog = append(s.snapshot.InstallLog, line)
@@ -675,58 +572,21 @@ func (s *Session) Install(progress func(string)) error {
 		}
 	}
 
-	s.logf(false, "开始安装 WinUSB 驱动（%s，接口 %d）", model.Name, model.Interface)
-	s.mu.Lock()
-	logDir := s.dataDir
-	s.mu.Unlock()
-
-	// The routes that can work, best first. A package signed at build time
-	// asks nothing of this machine; signing on the fly is the developer
-	// route, which needs the Windows SDK and installs a self-signed
-	// certificate into the machine's trust stores.
-	var result usb.InstallResult
-	var err error
-	switch {
-	case usb.HasEmbeddedPackage():
-		result, err = usb.InstallEmbeddedPackage(logDir, emit)
-	case usb.SignedInstallAvailable():
-		s.logf(false, "这个版本没有内置已签名的驱动包，改用开发模式："+
-			"在本机创建自签名证书、签好驱动包再安装（会改动系统信任，卸载时移除）")
-		result, err = usb.InstallSignedDriver(model, logDir, emit)
-	default:
-		s.logf(true, "既没有内置签名包，也没有 Windows SDK 的 makecat/signtool："+
-			"Windows 会拒绝未签名的驱动包，请改用 Zadig")
-		result, err = usb.InstallDriver(model, logDir, emit)
-	}
-	s.recordInstall(result)
+	s.Log("开始安装 WinUSB 驱动")
+	result, err := usb.InstallEmbeddedPackage("", emit)
 	for _, line := range result.Log {
-		s.logf(false, "%s", line)
+		s.Log("%s", line)
 	}
 	if err != nil {
 		if errors.Is(err, usb.ErrCanceled) {
-			s.logf(true, "已取消管理员授权，驱动未安装")
+			s.Log("已取消管理员授权，驱动未安装")
 			return err
 		}
-		if hint := usb.UnsignedHint(result.Log); hint != "" {
-			s.logf(true, "驱动安装失败：%s", hint)
-			return errors.New("驱动安装被 Windows 拒绝（详见安装日志）")
-		}
-		s.logf(true, "驱动安装失败：%v", err)
+		s.Log("驱动安装失败：%v", err)
 		return err
 	}
-	s.logf(false, "驱动安装完成；如果接口还没出现，请重新插拔接收器")
+	s.Log("驱动安装完成；如果接口还没出现，请重新插拔接收器")
 	return nil
-}
-
-// recordInstall keeps what the installer wrote and, when it failed for want of
-// a signature, says so once in a way the window can act on.
-func (s *Session) recordInstall(result usb.InstallResult) {
-	s.mu.Lock()
-	s.snapshot.DriverLogPath = result.LogPath
-	if hint := usb.UnsignedHint(result.Log); hint != "" {
-		s.snapshot.UnsignedRefused = true
-	}
-	s.mu.Unlock()
 }
 
 // Uninstall removes the WinUSB package from the control interface.
@@ -747,16 +607,12 @@ func (s *Session) Uninstall(progress func(string)) error {
 
 	if control == nil {
 		err := errors.New("厂商接口没有出现，也就没有可移除的驱动")
-		s.logf(true, "%v", err)
+		s.Log("%v", err)
 		return err
 	}
 
 	// The interface must be released before its driver can be removed.
 	s.close("卸载驱动前先断开接收器")
-
-	s.mu.Lock()
-	dataDir := s.dataDir
-	s.mu.Unlock()
 
 	emit := func(line string) {
 		s.mu.Lock()
@@ -768,128 +624,16 @@ func (s *Session) Uninstall(progress func(string)) error {
 		}
 	}
 
-	result, err := usb.UninstallDriver(*control, dataDir, emit)
-	s.recordInstall(result)
+	result, err := usb.UninstallDriver(*control, "", emit)
 	for _, line := range result.Log {
-		s.logf(false, "%s", line)
+		s.Log("%s", line)
 	}
 	if err != nil {
-		s.logf(true, "卸载驱动失败：%v", err)
+		s.Log("卸载驱动失败：%v", err)
 		return err
 	}
-	s.logf(false, "驱动已移除；请重新插拔接收器，让 Windows 回到默认驱动")
+	s.Log("驱动已移除；请重新插拔接收器，让 Windows 回到默认驱动")
 	return nil
-}
-
-// OpenZadig starts libwdi's graphical installer, which the user may already
-// have, with the receiver selected as far as the command line allows.
-func (s *Session) OpenZadig() error {
-	path, ok := usb.FindZadig()
-	if !ok {
-		return errors.New("没有找到 Zadig：请先下载 zadig.exe，或用「选择…」指定位置")
-	}
-	if err := usb.StartDetached(path); err != nil {
-		return err
-	}
-	s.logf(false, "已打开 Zadig：%s", path)
-	return nil
-}
-
-// OpenWdiSimple runs a user-supplied wdi-simple.exe elevated, with the
-// command line this project's notes document.
-func (s *Session) OpenWdiSimple(path string) error {
-	if path == "" {
-		found, ok := usb.FindWdiSimple()
-		if !ok {
-			return errors.New("没有找到 wdi-simple.exe：请用「选择…」指定位置")
-		}
-		path = found
-	}
-	s.mu.Lock()
-	model := s.snapshot.Model
-	haveModel := s.snapshot.HaveModel
-	s.mu.Unlock()
-	if !haveModel {
-		return errors.New("请先插上接收器")
-	}
-
-	s.mu.Lock()
-	s.snapshot.Installing = true
-	s.snapshot.InstallLog = nil
-	dataDir := s.dataDir
-	s.mu.Unlock()
-	s.changed()
-	defer func() {
-		s.mu.Lock()
-		s.snapshot.Installing = false
-		s.mu.Unlock()
-		s.Rescan()
-		s.changed()
-	}()
-
-	emit := func(line string) {
-		s.mu.Lock()
-		s.snapshot.InstallLog = append(s.snapshot.InstallLog, line)
-		s.mu.Unlock()
-		s.changed()
-	}
-	result, err := usb.InstallWithWdiSimple(model, path, dataDir, emit)
-	s.recordInstall(result)
-	for _, line := range result.Log {
-		s.logf(false, "%s", line)
-	}
-	if err != nil {
-		s.logf(true, "wdi-simple.exe 安装失败：%v", err)
-		return err
-	}
-	s.logf(false, "wdi-simple.exe 安装完成；请重新插拔接收器")
-	return nil
-}
-
-// RememberWdiSimple stores the path of a helper the user picked.
-func (s *Session) RememberWdiSimple(path string) {
-	s.mu.Lock()
-	s.tools.WdiSimple, s.tools.WdiSimpleSet = path, path != ""
-	s.snapshot.Tools = s.tools
-	configPath := s.configPath
-	s.mu.Unlock()
-	if configPath != "" {
-		_ = saveConfig(configPath, config{WdiSimple: path})
-	}
-	s.changed()
-}
-
-// refreshTools looks for the helper programs, using the remembered path for
-// wdi-simple.exe when there is one.
-func (s *Session) refreshTools() {
-	tools := Tools{
-		Elevated:      usb.IsElevated(),
-		SDKTools:      usb.SignedInstallAvailable(),
-		SignedPackage: usb.HasEmbeddedPackage(),
-	}
-	s.mu.Lock()
-	configPath := s.configPath
-	s.mu.Unlock()
-
-	if configPath != "" {
-		if cfg, err := loadConfig(configPath); err == nil && cfg.WdiSimple != "" {
-			tools.WdiSimple, tools.WdiSimpleSet = cfg.WdiSimple, true
-		}
-	}
-	if !tools.WdiSimpleSet {
-		if path, ok := usb.FindWdiSimple(); ok {
-			tools.WdiSimple, tools.WdiSimpleSet = path, true
-		}
-	}
-	if path, ok := usb.FindZadig(); ok {
-		tools.Zadig, tools.ZadigSet = path, true
-	}
-
-	s.mu.Lock()
-	s.tools = tools
-	s.snapshot.Tools = tools
-	s.mu.Unlock()
-	s.changed()
 }
 
 // Diagnostics renders everything the app knows about the device for copying
@@ -921,12 +665,6 @@ func (s *Session) Diagnostics() string {
 			blankText(d.Description), blankText(d.Driver.Service),
 			blankText(d.Driver.InfPath), blankText(d.Driver.Provider))
 	}
-	if len(snap.Notes) > 0 {
-		fmt.Fprintf(&b, "\n打开设备时的记录：\n")
-		for _, n := range snap.Notes {
-			fmt.Fprintf(&b, "  %s\n", n)
-		}
-	}
 	if snap.State.DialectKnown {
 		fmt.Fprintf(&b, "\n接收器：%s  序列号 %s  固件 %s\n",
 			blankText(snap.State.RX.Name), blankText(snap.State.RX.Serial), blankText(snap.State.RX.Firmware))
@@ -945,8 +683,6 @@ func (s *Session) Diagnostics() string {
 		sort.Strings(settings)
 		fmt.Fprintf(&b, "  设置：%s\n", strings.Join(settings, " "))
 	}
-	fmt.Fprintf(&b, "\n工具：wdi-simple=%s  zadig=%s  管理员=%v\n",
-		blankText(snap.Tools.WdiSimple), blankText(snap.Tools.Zadig), snap.Tools.Elevated)
 	fmt.Fprintf(&b, "\n活动日志：\n")
 	for _, line := range snap.Log {
 		fmt.Fprintf(&b, "  %s  %s\n", line.At.Format("15:04:05"), line.Text)

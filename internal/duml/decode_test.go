@@ -383,13 +383,6 @@ func TestSettingRegistryIsConsistent(t *testing.T) {
 				t.Errorf("%s: option with missing value or label: %+v", s.ID, o)
 			}
 		}
-		if s.Conflicts != "" && !seen[s.Conflicts] {
-			// The conflicting setting must also exist; it is declared after
-			// stereo, so a forward reference is fine as long as it resolves.
-			if _, ok := SettingByID(s.Conflicts); !ok {
-				t.Errorf("%s: conflicts with unknown setting %q", s.ID, s.Conflicts)
-			}
-		}
 	}
 	for _, s := range Settings {
 		if s.V1 == 0 && s.V2 == 0 {

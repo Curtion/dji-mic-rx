@@ -99,17 +99,6 @@ func (s State) Clone() State {
 // Setting returns the current value slug of a setting.
 func (s State) Setting(id string) string { return s.Settings[id] }
 
-// ConnectedTX returns the transmitters that are powered on, in unit order.
-func (s State) ConnectedTX() []*TXInfo {
-	out := make([]*TXInfo, 0, 2)
-	for i := range s.TX {
-		if s.TX[i].Present {
-			out = append(out, &s.TX[i])
-		}
-	}
-	return out
-}
-
 // TXCount is how many transmitters are powered on.
 func (s State) TXCount() int {
 	n := 0

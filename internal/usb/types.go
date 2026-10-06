@@ -29,18 +29,12 @@ type DriverInfo struct {
 	// InfPath is the driver package as the driver store names it, e.g.
 	// "oem42.inf"; this is what pnputil needs to remove it.
 	InfPath string
-	// InfOriginalName is the package's own file name, as its author wrote
-	// it, e.g. "wireless_mic_rx_(interface_6).inf" for a libwdi install.
-	InfOriginalName string
-	// Provider is who published the package, e.g. "Microsoft" or "libwdi".
+	// Provider is who published the package, e.g. "Microsoft".
 	Provider string
 	// Description and Version come from the driver package.
 	Description string
 	Version     string
 }
-
-// Bound reports whether any driver is bound to the node.
-func (d DriverInfo) Bound() bool { return d.Service != "" }
 
 // Info is one device node of the receiver: the whole device, or one of its
 // interfaces.
@@ -59,8 +53,7 @@ type Info struct {
 	Present bool
 	// Description is what Windows calls the node, e.g. "Wireless Mic Rx".
 	Description string
-	// ClassGUID identifies the device class the node was installed under;
-	// formatting it is left to the caller.
+	// Driver is the driver package bound to the node.
 	Driver DriverInfo
 }
 
@@ -117,8 +110,7 @@ type Status struct {
 	Devices []Info
 	// Control is the vendor interface node, if it exists at all.
 	Control *Info
-	// AudioDevices describes the receiver's audio and HID interfaces, kept
-	// so the UI can show that recording is untouched by the installer.
+	// Scanned is when the scan ran.
 	Scanned time.Time
 }
 

@@ -15,7 +15,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -29,8 +28,6 @@ func main() {
 		readFor  = flag.Duration("t", 5*time.Second, "how long to read status frames")
 		onlyScan = flag.Bool("scan", false, "only report the device tree")
 		set      = flag.String("set", "", "after reading, send one setting as id=value and wait for its acknowledgement")
-		probe    = flag.Bool("probe", false, "try every device interface class of the control node and report which one WinUSB accepts")
-		writeInf = flag.String("write-inf", "", "write the driver INF for the known receiver into this directory and exit")
 		install  = flag.Bool("install-driver", false, "install the WinUSB driver (asks for administrator rights) and print the log")
 		uninst   = flag.Bool("uninstall-driver", false, "remove the WinUSB driver package and print the log")
 	)
@@ -94,50 +91,10 @@ func main() {
 		return
 	}
 
-	// The build script asks for the INF instead of keeping a copy of its own:
-	// the text lives in the app, so there is only one of it.
-	if *writeInf != "" {
-		model, ok := status.Model()
-		if !ok {
-			model = usb.DefaultModel()
-		}
-		path, err := usb.WriteInf(model, *writeInf)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "写入 INF 失败:", err)
-			os.Exit(1)
-		}
-		fmt.Println("已写入", path)
-		return
-	}
-
-	if *probe {
-		if status.Control == nil {
-			fmt.Fprintln(os.Stderr, "厂商接口不在设备树上")
-			os.Exit(1)
-		}
-		for _, attempt := range usb.ProbeInterfaces(*status.Control) {
-			switch {
-			case attempt.OK:
-				fmt.Printf("  %s 可以打开\n    %s\n", attempt.GUID, attempt.Path)
-			case attempt.Err != nil:
-				fmt.Printf("  %s 失败：%v\n", attempt.GUID, attempt.Err)
-				if attempt.Path != "" {
-					fmt.Printf("    %s\n", attempt.Path)
-				}
-			}
-		}
-		return
-	}
-
 	// Driver work happens before opening the device: installing a driver
 	// means the connection has to be made again afterwards anyway.
 	if *install {
-		model, ok := status.Model()
-		if !ok {
-			fmt.Fprintln(os.Stderr, "没有匹配的型号，不安装驱动")
-			os.Exit(1)
-		}
-		if err := installDriver(model); err != nil {
+		if err := installDriver(); err != nil {
 			os.Exit(1)
 		}
 		return
@@ -226,33 +183,20 @@ func main() {
 // installDriver runs the same elevated install the window runs, and prints
 // the installer's output so it can be read without the window open. It is the
 // half of the diagnostics that needs administrator rights.
-func installDriver(model duml.Model) error {
+func installDriver() error {
 	fmt.Println("开始安装 WinUSB 驱动（会弹一次管理员授权）…")
-	result, err := usb.InstallDriver(model, logDir(), func(line string) {
+	result, err := usb.InstallEmbeddedPackage("", func(line string) {
 		fmt.Println("  " + line)
 	})
 	for _, line := range result.Log {
 		fmt.Println("  " + line)
 	}
-	if result.LogPath != "" {
-		fmt.Println("安装日志：" + result.LogPath)
-	}
 	if err != nil {
 		if errors.Is(err, usb.ErrCanceled) {
-			fmt.Fprintln(os.Stderr, "提权被取消或未获批准（管理员授权窗口必须点“是”），驱动没有安装。")
-			fmt.Fprintln(os.Stderr, "如果授权窗口没有出现，请在本机桌面上手动运行："+
-				"go run ./cmd/djiprobe -install-driver")
+			fmt.Fprintln(os.Stderr, "提权被取消或未获批准，驱动没有安装。")
 			return err
 		}
-		if hint := usb.UnsignedHint(result.Log); hint != "" {
-			fmt.Println()
-			fmt.Println(hint)
-		}
-		if len(result.Log) == 0 {
-			fmt.Fprintf(os.Stderr, "安装未启动或没有输出：%v\n", err)
-		} else {
-			fmt.Fprintf(os.Stderr, "安装失败：%v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "安装失败：%v\n", err)
 		return err
 	}
 	fmt.Println("安装完成。请重新插拔接收器，然后运行 -scan 或直接读状态。")
@@ -263,29 +207,18 @@ func installDriver(model duml.Model) error {
 // same output.
 func uninstallDriver(node usb.Info) error {
 	fmt.Println("开始移除驱动包（会弹一次管理员授权）…")
-	result, err := usb.UninstallDriver(node, logDir(), func(line string) {
+	result, err := usb.UninstallDriver(node, "", func(line string) {
 		fmt.Println("  " + line)
 	})
 	for _, line := range result.Log {
 		fmt.Println("  " + line)
 	}
-	if result.LogPath != "" {
-		fmt.Println("安装日志：" + result.LogPath)
-	}
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "卸载失败：%v\n", err)
 		return err
 	}
 	fmt.Println("驱动已移除。请重新插拔接收器。")
 	return nil
-}
-
-// logDir is where the installers keep their output, under the user's data
-// directory so it survives the run that wrote it.
-func logDir() string {
-	if dir := os.Getenv("APPDATA"); dir != "" {
-		return filepath.Join(dir, "dji-mic-rx")
-	}
-	return ""
 }
 
 // sendSetting writes one setting and waits for the receiver to acknowledge it,

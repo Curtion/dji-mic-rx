@@ -64,11 +64,6 @@ type Setting struct {
 	// ReadOnlyOnV1 is true where v1 firmware reports the setting but has no
 	// command to change it (only the transmitter's own button can).
 	ReadOnlyOnV1 bool
-	// Reboots is true when changing the setting restarts the receiver.
-	Reboots bool
-	// Conflicts names settings the receiver turns off when this one turns
-	// on: stereo and the safety track share the same channel.
-	Conflicts string
 }
 
 // Command returns the command id and target to use for a setting on dialect d.
@@ -178,30 +173,26 @@ var Settings = []Setting{
 	{
 		ID:      "stereo",
 		Label:   "声道模式",
-		Detail:  "单声道为两路混音，立体声分左右声道",
+		Detail:  "单声道为两路混音，立体声分左右声道；与安全音轨共用第二声道，开一个会关另一个",
 		Group:   GroupAudio,
 		Kind:    KindChoice,
 		V1:      0x0008,
 		V2:      0x0008,
 		Target:  TargetRX,
 		Options: []Option{{Value: "mono", Label: "单声道", Wire: 0x00}, {Value: "stereo", Label: "立体声", Wire: 0x02}},
-		// Stereo and the safety track share the second channel: turning one
-		// on turns the other off in the receiver.
-		Conflicts: "safety-track",
 	},
 	{
-		ID:        "safety-track",
-		Label:     "安全音轨",
-		Detail:    "第二声道低 6 dB 备份，防止爆音",
-		Group:     GroupAudio,
-		Kind:      KindToggle,
-		V1:        0x0021,
-		V2:        0x0021,
-		Target:    TargetRX,
-		Options:   toggle(offOption, onOption),
-		Off:       "off",
-		On:        "on",
-		Conflicts: "stereo",
+		ID:      "safety-track",
+		Label:   "安全音轨",
+		Detail:  "第二声道低 6 dB 备份，防止爆音；与立体声共用第二声道，开一个会关另一个",
+		Group:   GroupAudio,
+		Kind:    KindToggle,
+		V1:      0x0021,
+		V2:      0x0021,
+		Target:  TargetRX,
+		Options: toggle(offOption, onOption),
+		Off:     "off",
+		On:      "on",
 	},
 	{
 		ID:      "clip-limiter",
@@ -273,7 +264,7 @@ var Settings = []Setting{
 	{
 		ID:      "plug-free",
 		Label:   "免拔插外放",
-		Detail:  "接收器从相机/手机拔出后也用外放",
+		Detail:  "接收器从相机/手机拔出后也用外放；更改后接收器会重启，几秒后自动恢复",
 		Group:   GroupDevice,
 		Kind:    KindToggle,
 		V1:      0x0023,
@@ -282,7 +273,6 @@ var Settings = []Setting{
 		Options: toggle(offOption, onOption),
 		Off:     "off",
 		On:      "on",
-		Reboots: true,
 	},
 	{
 		ID:     "voice-tone",
@@ -310,17 +300,6 @@ func SettingByID(id string) (Setting, bool) {
 		}
 	}
 	return Setting{}, false
-}
-
-// SharedSettings returns the settings that are not per transmitter.
-func SharedSettings() []Setting {
-	out := make([]Setting, 0, len(Settings))
-	for _, s := range Settings {
-		if !s.PerTransmitter {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // BatteryPercent converts the receiver's 3-bit battery gauge to a percentage.

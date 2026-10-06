@@ -22,7 +22,7 @@ func main() {
 	width := flag.Int("w", 1180, "window width in DIPs")
 	height := flag.Int("h", 820, "window height in DIPs")
 	scale := flag.Float64("scale", 1.5, "device pixel ratio")
-	pages := flag.String("pages", "status,audio,power,device,driver,about", "pages to draw")
+	pages := flag.String("pages", "status,settings,driver", "pages to draw")
 	flag.Parse()
 
 	situations := []struct {

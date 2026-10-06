@@ -10,7 +10,6 @@ package main
 import (
 	"log"
 	"os"
-	"path/filepath"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -23,7 +22,7 @@ import (
 // helperFlags are the arguments the elevated half of a driver install runs
 // with. When they are present this process is not the window: it performs the
 // privileged step and exits.
-var helperFlags = []string{"--driver-install", "--driver-install-wdi", "--driver-uninstall"}
+var helperFlags = []string{"--driver-install-package", "--driver-uninstall"}
 
 func main() {
 	args := os.Args[1:]
@@ -32,10 +31,6 @@ func main() {
 	}
 
 	sess := session.New(session.Options{})
-	if dir, err := mygo.App.Path(mygo.PathUserData); err == nil {
-		sess.SetConfigPath(filepath.Join(dir, "settings.json"))
-	}
-
 	app := console.New(sess)
 
 	mygo.App.WhenReady(func() {
@@ -50,10 +45,8 @@ func main() {
 			BackgroundColor: "light-dark(#f0f2f1, #15191b)",
 			Content:         ui.View(app.View),
 		})
-		app.SetWindow(win)
 		sess.SetOnChange(win.Invalidate)
 		sess.Start()
-		app.PromptForDriver(win)
 	})
 
 	if err := mygo.App.Run(); err != nil {

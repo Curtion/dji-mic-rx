@@ -5,16 +5,15 @@ package usb
 import (
 	"embed"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// embeddedPackage carries a driver package signed before the build, so the
-// app only has to import it. The directory holds whatever the scripts put
-// there:
+// embeddedPackage carries the driver package signed before the build, so the
+// app only has to import it. The directory holds whatever scripts\build.cmd
+// put there:
 //
 //	dji_mic_rx_control.inf  the package
 //	dji_mic_rx_control.cat  its catalog, signed at build time
@@ -22,16 +21,10 @@ import (
 //	                        certificate, present when the package was signed
 //	                        with the app's own self-signed certificate. When
 //	                        it is there the installer trusts it on the target
-//	                        machine, which is an in-box certutil call and needs
-//	                        no SDK. A package signed by a public authority
-//	                        carries no .cer and asks nothing of the machine.
+//	                        machine, which is an in-box certutil call. A
+//	                        package signed by a public authority carries no
+//	                        .cer and asks nothing of the machine.
 //
-// To produce it: scripts/make-selfsigned-cert.ps1 (once, on the build machine)
-// then scripts/sign-package.ps1, or go generate ./internal/usb, which runs
-// both.
-//
-//go:generate powershell -ExecutionPolicy Bypass -File ../../scripts/make-selfsigned-cert.ps1
-//go:generate powershell -ExecutionPolicy Bypass -File ../../scripts/sign-package.ps1
 //go:embed package
 var embeddedPackage embed.FS
 
@@ -65,8 +58,8 @@ func EmbeddedPackage() (files map[string][]byte, infName string, ok bool) {
 			infName = name
 		}
 	}
-	// A package without a catalog is the unsigned package this app can write
-	// itself at runtime, which Windows refuses; treat it as absent.
+	// A package without a catalog is an unsigned package, which Windows
+	// refuses; treat it as absent.
 	hasCatalog := false
 	for name := range files {
 		if strings.EqualFold(filepath.Ext(name), ".cat") {
@@ -133,12 +126,9 @@ func installEmbeddedPackage(dir, infName string, logf func(string, ...any)) int 
 	logf("导入驱动包：%s", infPath)
 	if _, err := runCaptured("pnputil", []string{"/add-driver", infPath, "/install"}, logf); err != nil {
 		logf("导入失败：%v", err)
-		logf("如果提示签名或证书问题，说明这个包在构建时没有签好，或证书链不被本机信任。")
 		return 1
 	}
 	runCaptured("pnputil", []string{"/scan-devices"}, logf)
 	logf("驱动包已安装。若界面仍未连上，请重新插拔接收器。")
 	return 0
 }
-
-var _ = fmt.Sprintf

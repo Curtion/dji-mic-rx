@@ -48,9 +48,7 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 $ErrorActionPreference = 'Stop'
 
 # 校验自签名包时 signtool 会把「证书链不被信任」写到错误流，而本机确实还没信任它；
-# 校验本身不能被当成终止错误。
-# 外部工具的退出码在后面逐个显式检查，所以这里不用 Stop：
-# 自签名包校验时 signtool 会把「证书链不被信任」写到 stderr，Stop 会把它当成终止错误。
+# 校验本身不能被当成终止错误。外部工具的退出码在后面逐个显式检查，所以这里不用 Stop。
 $ErrorActionPreference = 'Continue'
 $env:PSModulePath = @(
   (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules'),
@@ -70,7 +68,7 @@ function Find-SdkTool([string]$name) {
     Where-Object { Test-Path $_ } |
     Select-Object -First 1
   if (-not $found) {
-    throw "找不到 $name：签名需要 Windows SDK（本机未安装时请改用 Zadig 安装驱动）"
+    throw "找不到 $name：签名需要 Windows SDK"
   }
   return $found
 }
@@ -109,14 +107,7 @@ Write-Host "== 2/4 生成目录文件并签名" -ForegroundColor Cyan
 $infPath = Join-Path $work 'dji_mic_rx_control.inf'
 $infTemplate = Join-Path $outDir 'dji_mic_rx_control.inf'
 if (-not (Test-Path $infTemplate)) {
-  # The INF text lives in the app, so ask for it rather than keeping a second
-  # copy here that would drift.
-  Write-Host "   生成 INF 模板（dji-mic-rx -write-inf）"
-  Push-Location $root
-  try {
-    & go run ./cmd/djiprobe -write-inf "internal/usb/package"
-    if ($LASTEXITCODE -ne 0) { throw "生成 INF 失败（退出码 $LASTEXITCODE）" }
-  } finally { Pop-Location }
+  throw "缺少 INF 模板：$infTemplate（仓库里应自带 internal/usb/package/dji_mic_rx_control.inf）"
 }
 Copy-Item -LiteralPath $infTemplate -Destination $infPath -Force
 $cdf = @"

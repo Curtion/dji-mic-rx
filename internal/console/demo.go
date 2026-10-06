@@ -32,10 +32,9 @@ const (
 // Demo is a stand-in for the device session, so every page can be drawn — and
 // looked at — without a receiver plugged in.
 type Demo struct {
-	kind  DemoKind
-	mu    sync.Mutex
-	snap  session.Snapshot
-	logAt time.Time
+	kind DemoKind
+	mu   sync.Mutex
+	snap session.Snapshot
 }
 
 // NewDemo returns a source that stands in for the receiver.
@@ -54,10 +53,8 @@ func (d *Demo) build() session.Snapshot {
 		State:           duml.NewState(),
 		FramesPerSecond: 10.2,
 		LastFrame:       now.Add(-80 * time.Millisecond),
-		Tools:           session.Tools{WdiSimple: `C:\tools\wdi-simple.exe`, WdiSimpleSet: true},
 		Log: []session.LogLine{
 			{At: now.Add(-42 * time.Second), Text: "已连接接收器（DJI Mic Mobile RX (DMMR01 / DMMR02)，接口 6，端点 0x06/0x86）"},
-			{At: now.Add(-42 * time.Second), Text: "endpoints: 0x06(bulk,512) 0x86(bulk,512)"},
 			{At: now.Add(-42 * time.Second), Text: "协议版本 v2，状态推送已开始"},
 			{At: now.Add(-12 * time.Second), Text: "已设置 降噪强度 = 强"},
 		},
@@ -115,7 +112,6 @@ func (d *Demo) build() session.Snapshot {
 		nodes = append(nodes, control)
 		snap.Status = usb.Status{Devices: nodes, Control: &control, Scanned: now}
 		snap.Connected = true
-		snap.Notes = []string{"endpoints: 0x06(bulk,512) 0x86(bulk,512)"}
 		snap.State = liveState(d.kind == DemoV1)
 	case DemoNoInterface:
 		snap.Status = usb.Status{Devices: nodes, Scanned: now}
@@ -126,19 +122,13 @@ func (d *Demo) build() session.Snapshot {
 		nodes = append(nodes, noDriver)
 		snap.Status = usb.Status{Devices: nodes, Control: &noDriver, Scanned: now}
 		snap.ConnectionError = "厂商接口还没有绑定 WinUSB 驱动，所以收不到麦克风状态。"
-		// The state this machine really ends up in: Windows refuses the
-		// package the app writes itself, because it carries no signature.
-		snap.UnsignedRefused = true
-		snap.DriverLogPath = `C:\Users\Curtion\AppData\Roaming\dji-mic-rx\logs\driver-20261006-200150.log`
 		snap.InstallLog = []string{
-			`以管理员身份运行：[--driver-install C:\Users\Curtion\AppData\Local\Temp\dji-mic-rx-driver-541133507\dji_mic_rx_control.inf --log ...]`,
-			`安装驱动包：C:\Users\Curtion\AppData\Local\Temp\dji-mic-rx-driver-541133507\dji_mic_rx_control.inf`,
-			`  Microsoft PnP Utility`,
-			`  Adding driver package:  dji_mic_rx_control.inf`,
-			`  Failed to add driver package: 该驱动程序包的签名无效或不存在（0xE000022F）`,
-			`  Total driver packages:  1`,
-			`  Added driver packages:  0`,
-			`pnputil 失败：exit status 5`,
+			"以管理员身份运行：[--driver-install-package ...]",
+			"导入驱动包：C:\\...\\dji_mic_rx_control.inf",
+			"  Microsoft PnP Utility",
+			"  Adding driver package:  dji_mic_rx_control.inf",
+			"  Driver package added successfully.",
+			"驱动包已安装。若界面仍未连上，请重新插拔接收器。",
 		}
 	}
 	return snap
@@ -250,51 +240,14 @@ func (d *Demo) SendToTransmitter(settingID, value string, unit int) error {
 
 // Install pretends to install the driver.
 func (d *Demo) Install(progress func(string)) error {
-	lines := []string{
-		"以管理员身份运行：--driver-install-wdi C:\\tools\\wdi-simple.exe",
-		"调用 wdi-simple.exe 把 WinUSB 绑定到接口 6",
-		"  wdi-simple: installing driver for USB\\VID_2CA3&PID_4011&MI_06",
-		"  wdi-simple: driver installed successfully",
-		"wdi-simple.exe 完成。请重新插拔接收器。",
-	}
-	d.mu.Lock()
-	d.snap.InstallLog = append([]string(nil), lines...)
-	d.mu.Unlock()
-	if progress != nil {
-		for _, line := range lines {
-			progress(line)
-		}
-	}
+	d.Log("安装驱动（示例）")
 	return nil
 }
 
 // Uninstall pretends to remove the driver.
 func (d *Demo) Uninstall(progress func(string)) error {
-	lines := []string{"移除驱动包：oem42.inf", "  pnputil: 已成功删除驱动程序包。"}
-	d.mu.Lock()
-	d.snap.InstallLog = append([]string(nil), lines...)
-	d.mu.Unlock()
-	if progress != nil {
-		for _, line := range lines {
-			progress(line)
-		}
-	}
+	d.Log("移除驱动（示例）")
 	return nil
-}
-
-// OpenZadig pretends to start Zadig.
-func (d *Demo) OpenZadig() error { d.Log("已打开 Zadig"); return nil }
-
-// OpenWdiSimple pretends to run wdi-simple.exe.
-func (d *Demo) OpenWdiSimple(path string) error {
-	return d.Install(nil)
-}
-
-// RememberWdiSimple stores a helper path.
-func (d *Demo) RememberWdiSimple(path string) {
-	d.mu.Lock()
-	d.snap.Tools.WdiSimple, d.snap.Tools.WdiSimpleSet = path, path != ""
-	d.mu.Unlock()
 }
 
 // Diagnostics renders a short report.
