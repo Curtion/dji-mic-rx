@@ -12,8 +12,9 @@ type RXInfo struct {
 	// the heartbeat (v1).
 	Serial, Firmware string
 	// BatteryGauge is the receiver's 3-bit gauge, 1 (full) to 7 (empty);
-	// 0 means the receiver does not report one. Only the Mic Mini 2 reports
-	// it, and only on v2 firmware.
+	// 0 means there is no battery to report. A receiver with a battery
+	// reports it on v2 firmware; the mobile receiver (DMMR02) has none and
+	// leaves the bits clear.
 	BatteryGauge int
 	// Charging is true while the receiver is charging.
 	Charging bool
@@ -36,8 +37,9 @@ type TXInfo struct {
 	// Level is the live audio input level in the device's own units, or -1
 	// while unknown.
 	Level int
-	// BatteryGauge is 1 (full) to 7 (empty); 0 means unknown, which is
-	// always the case on v1 firmware.
+	// BatteryGauge is 1 (full) to 7 (empty); 0 means it is not reported,
+	// which is always the case on v1 firmware, and behind the DJI Mic
+	// series mobile receiver (DMMR02) as well.
 	BatteryGauge int
 	// Charging is true while the transmitter sits in its charging case.
 	Charging bool

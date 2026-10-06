@@ -107,7 +107,7 @@ func driverStatusFor(snap session.Snapshot, p palette) driverStatus {
 		return driverStatus{
 			title:   "未检测到接收器",
 			summary: "把接收器用 USB-C 线连到电脑，然后点「重新检测」。",
-			detail:  "支持的型号：DJI Mic Mobile RX（DMMR01/DMMR02，USB 0x2ca3:0x4011）。它的音频接口会照常出现在系统的录音设备里。",
+			detail:  "支持的型号：DJI Mic 系列接收器（DMMR01 标准版 / DMMR02 手机版，USB 0x2ca3:0x4011）。它的音频接口会照常出现在系统的录音设备里。",
 			color:   p.inkFaint,
 		}
 	case snap.Status.Ready():

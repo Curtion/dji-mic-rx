@@ -302,10 +302,10 @@ func SettingByID(id string) (Setting, bool) {
 	return Setting{}, false
 }
 
-// BatteryPercent converts the receiver's 3-bit battery gauge to a percentage.
-// The gauge runs 1 (full) to 7 (empty, immediately before shutdown); values
-// in between are evenly spaced, and 0, which has not been observed in
-// practice, means unknown.
+// BatteryPercent converts a 3-bit battery gauge to a percentage. The gauge
+// runs 1 (full) to 7 (empty, immediately before shutdown) with the values in
+// between evenly spaced; 0 means no gauge is reported, as on the DJI Mic
+// series mobile receiver (DMMR02), which has no battery.
 func BatteryPercent(gauge int) (int, bool) {
 	if gauge < 1 || gauge > 7 {
 		return 0, false

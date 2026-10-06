@@ -27,24 +27,24 @@ func (a *App) statusPage(c *ui.Context, p palette, snap session.Snapshot) {
 	a.statusV2(c, p, snap)
 }
 
-// statusV2 arranges the three devices as equal panels: on v2 every one of
-// them reports charge of its own.
+// statusV2 arranges the three devices as one row of equal panels: the cards
+// stretch to a common height, so their edges and identity rows line up.
 func (a *App) statusV2(c *ui.Context, p palette, snap session.Snapshot) {
-	ui.Row(c).Gap(16).AlignItems(ui.Start).Children(func() {
-		ui.Column(c).Grow(1).Children(func() { a.receiverCard(c, p, snap) })
-		ui.Column(c).Grow(1).Children(func() { a.transmitterCard(c, p, snap, 0) })
-		ui.Column(c).Grow(1).Children(func() { a.transmitterCard(c, p, snap, 1) })
+	ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
+		a.receiverCard(c, p, snap).Grow(1)
+		a.transmitterCard(c, p, snap, 0).Grow(1)
+		a.transmitterCard(c, p, snap, 1).Grow(1)
 	})
 }
 
 // statusV1 gives the page to the transmitters: the v1 receiver reports no
-// charge and no dial position, so it is a strip of facts, and the levels
-// below get the room.
+// charge and no dial position, so it is a strip of facts, and the two
+// transmitter cards below share one height.
 func (a *App) statusV1(c *ui.Context, p palette, snap session.Snapshot) {
 	a.receiverStrip(c, p, snap)
-	ui.Row(c).Gap(16).AlignItems(ui.Start).Children(func() {
-		ui.Column(c).Grow(1).Children(func() { a.transmitterCard(c, p, snap, 0) })
-		ui.Column(c).Grow(1).Children(func() { a.transmitterCard(c, p, snap, 1) })
+	ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
+		a.transmitterCard(c, p, snap, 0).Grow(1)
+		a.transmitterCard(c, p, snap, 1).Grow(1)
 	})
 }
 
@@ -65,9 +65,9 @@ func (a *App) receiverStrip(c *ui.Context, p palette, snap session.Snapshot) *ui
 }
 
 // receiverCard shows the v2 receiver: the link, the gain dial's position, its
-// charge, and its identity.
-func (a *App) receiverCard(c *ui.Context, p palette, snap session.Snapshot) {
-	card(c, p, "接收器", "USB-C 连电脑", func() {
+// charge when it has a battery, and its identity.
+func (a *App) receiverCard(c *ui.Context, p palette, snap session.Snapshot) *ui.Element {
+	return card(c, p, "接收器", "USB-C 连电脑", func() {
 		a.linkLine(c, p, snap.Connected, a.deviceName(snap))
 
 		if snap.State.RX.HasGain {
@@ -89,12 +89,12 @@ func (a *App) receiverCard(c *ui.Context, p palette, snap session.Snapshot) {
 				ui.Spacer(c)
 			})
 		} else {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-				batteryGlyph(c, p, 0, false, false)
-				ui.Text(c, "电量未知").FontSize(sizeValue).TextColor(p.inkDim)
-			})
+			// No gauge means no battery to show: the DJI Mic series mobile
+			// receiver (DMMR02) is powered by USB-C instead.
+			ui.Text(c, "由 USB-C 供电，无内置电池").FontSize(sizeLabel).TextColor(p.inkDim).SingleLine()
 		}
 
+		ui.Spacer(c)
 		hairline(c, p)
 		ui.Column(c).Gap(6).Children(func() {
 			specRow(c, p, "序列号", blank(snap.State.RX.Serial), true)
@@ -132,18 +132,19 @@ func (a *App) dialScale(c *ui.Context, p palette, db int) {
 	})
 }
 
-// transmitterCard shows one transmitter: its link, its charge, its live level,
-// and the settings that belong to it alone. The charge block belongs to v2,
-// which is the protocol that reports it.
-func (a *App) transmitterCard(c *ui.Context, p palette, snap session.Snapshot, index int) {
+// transmitterCard shows one transmitter: its link, its charge where one is
+// reported, its live level, and the settings that belong to it alone.
+func (a *App) transmitterCard(c *ui.Context, p palette, snap session.Snapshot, index int) *ui.Element {
 	tx := snap.State.TX[index]
 	title := fmt.Sprintf("发射器 %d", index+1)
-	card(c, p, title, "别在衣领上的那支", func() {
+	return card(c, p, title, "别在衣领上的那支", func() {
 		a.linkLine(c, p, tx.Present, tx.Name)
 
+		// The charge row exists only where there is a gauge: v2 firmware
+		// reports one, but behind the mobile receiver (DMMR02) it stays
+		// clear, so no placeholder is drawn.
 		if snap.State.Dialect == duml.V2 {
-			pct, batteryKnown := tx.BatteryPercent()
-			if batteryKnown {
+			if pct, known := tx.BatteryPercent(); known {
 				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 					batteryGlyph(c, p, pct, true, tx.Charging)
 					ui.Text(c, percentText(pct, true)).FontSize(sizeValue).
@@ -153,23 +154,20 @@ func (a *App) transmitterCard(c *ui.Context, p palette, snap session.Snapshot, i
 					}
 					ui.Spacer(c)
 				})
-			} else {
-				ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-					batteryGlyph(c, p, 0, false, false)
-					ui.Text(c, condition(tx.Present, "电量未知", "未连接")).FontSize(sizeValue).
-						TextColor(p.inkDim)
-				})
 			}
 		}
 
 		hairline(c, p)
 		a.levelRow(c, p, snap, index)
 
-		if tone, ok := duml.SettingByID("voice-tone"); ok && tone.Available(snap.State.Dialect, a.product(snap)) {
+		// Voice tone is the transmitter's own setting, so its availability
+		// is decided by the transmitter's product name, not the receiver's.
+		if tone, ok := duml.SettingByID("voice-tone"); ok && tone.Available(snap.State.Dialect, tx.Name) {
 			hairline(c, p)
 			a.voiceToneRow(c, p, tx, index, tone)
 		}
 
+		ui.Spacer(c)
 		hairline(c, p)
 		ui.Column(c).Gap(6).Children(func() {
 			specRow(c, p, "序列号", blank(tx.Serial), true)

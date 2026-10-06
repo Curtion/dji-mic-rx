@@ -14,8 +14,9 @@ import (
 type DemoKind int
 
 const (
-	// DemoLive is a Mic Mini 2 with both transmitters connected and the
-	// driver in place.
+	// DemoLive is a Mic Mini 2 setup with the standard receiver (DMMR01,
+	// which has a battery), both transmitters connected, and the driver in
+	// place.
 	DemoLive DemoKind = iota
 	// DemoNoInterface is a receiver whose vendor interface is not on the
 	// device tree at all, which is what a missing driver looks like when
@@ -27,6 +28,10 @@ const (
 	// DemoV1 is a first generation Mic Mini: protocol v1, no battery
 	// levels, no voice tone.
 	DemoV1
+	// DemoMobile is the DJI Mic series mobile receiver (DMMR02) at work:
+	// protocol v2, no battery in the receiver at all, and no battery
+	// telemetry from the transmitters behind it either.
+	DemoMobile
 )
 
 // Demo is a stand-in for the device session, so every page can be drawn — and
@@ -54,7 +59,7 @@ func (d *Demo) build() session.Snapshot {
 		FramesPerSecond: 10.2,
 		LastFrame:       now.Add(-80 * time.Millisecond),
 		Log: []session.LogLine{
-			{At: now.Add(-42 * time.Second), Text: "已连接接收器（DJI Mic Mobile RX (DMMR01 / DMMR02)，接口 6，端点 0x06/0x86）"},
+			{At: now.Add(-42 * time.Second), Text: "已连接接收器（DJI Mic series RX (DMMR01 / DMMR02)，接口 6，端点 0x06/0x86）"},
 			{At: now.Add(-42 * time.Second), Text: "协议版本 v2，状态推送已开始"},
 			{At: now.Add(-12 * time.Second), Text: "已设置 降噪强度 = 强"},
 		},
@@ -108,11 +113,15 @@ func (d *Demo) build() session.Snapshot {
 	}
 
 	switch d.kind {
-	case DemoLive, DemoV1:
+	case DemoLive, DemoV1, DemoMobile:
 		nodes = append(nodes, control)
 		snap.Status = usb.Status{Devices: nodes, Control: &control, Scanned: now}
 		snap.Connected = true
-		snap.State = liveState(d.kind == DemoV1)
+		if d.kind == DemoMobile {
+			snap.State = mobileState()
+		} else {
+			snap.State = liveState(d.kind == DemoV1)
+		}
 	case DemoNoInterface:
 		snap.Status = usb.Status{Devices: nodes, Scanned: now}
 		snap.ConnectionError = "接收器已连接，但它的厂商接口（接口 6）还没有出现。装上驱动后请重新插拔接收器。"
@@ -134,7 +143,9 @@ func (d *Demo) build() session.Snapshot {
 	return snap
 }
 
-// liveState is the decoded state of a receiver that is working.
+// liveState is the decoded state of a working setup: the v1 original when
+// v1 is set, otherwise the standard v2 receiver — the DJI Mic Mini receiver
+// (DMMR01), which reports a battery of its own.
 func liveState(v1 bool) duml.State {
 	state := duml.NewState()
 	if v1 {
@@ -165,7 +176,7 @@ func liveState(v1 bool) duml.State {
 
 	state.Dialect, state.DialectKnown = duml.V2, true
 	state.RX = duml.RXInfo{
-		Name:         "DJI Mic Mini 2",
+		Name:         "DJI Mic Mini",
 		Serial:       "3PCDM7B0A1K9Z2",
 		Firmware:     "02.03.17.00",
 		BatteryGauge: 2,
@@ -192,6 +203,22 @@ func liveState(v1 bool) duml.State {
 	}
 	state.Packets = 3841
 	state.Updated = time.Now()
+	return state
+}
+
+// mobileState is the decoded state of the DJI Mic series mobile receiver
+// (DMMR02): the same v2 firmware family as the standard receiver, but no
+// battery — the receiver has none, and it passes no battery telemetry
+// through from the transmitters either.
+func mobileState() duml.State {
+	state := liveState(false)
+	state.RX.Name = "DJI Mic Mini 2"
+	state.RX.BatteryGauge = 0
+	state.RX.Charging = false
+	for i := range state.TX {
+		state.TX[i].BatteryGauge = 0
+		state.TX[i].Charging = false
+	}
 	return state
 }
 

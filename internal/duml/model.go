@@ -6,8 +6,9 @@ package duml
 // The vendor id 0x2ca3 is shared by every DJI device, so it identifies "a DJI
 // device", not a model. The product id identifies a receiver family, and the
 // interface and endpoints are decided by firmware: interface 6 with bulk
-// 0x06/0x86 for the Mobile RX, interface 4 with bulk 0x04/0x84 (alternate
-// setting 1) for the Mic Mini 2S RX. Never guess these: look them up here.
+// 0x06/0x86 for the standard and mobile receivers (DMMR01 / DMMR02),
+// interface 4 with bulk 0x04/0x84 (alternate setting 1) for the Mic Mini 2S
+// RX. Never guess these: look them up here.
 type Model struct {
 	// Name is the product family this entry covers.
 	Name string
@@ -29,14 +30,15 @@ type Model struct {
 // Models is the known receiver table, keyed by USB ids.
 var Models = []Model{
 	{
-		Name:      "DJI Mic Mobile RX (DMMR01 / DMMR02)",
+		Name:      "DJI Mic series RX (DMMR01 / DMMR02)",
 		Vendor:    0x2ca3,
 		Product:   0x4011,
 		Interface: 6,
 		BulkOut:   0x06,
 		BulkIn:    0x86,
 		Verified:  true,
-		Note:      "DJI Mic Mini and Mic Mini 2 phone receivers",
+		Note: "DMMR01 is the DJI Mic Mini receiver with a battery; DMMR02 is the DJI Mic series " +
+			"mobile receiver without one (USB-C powered); the USB id is shared",
 	},
 	{
 		Name:       "DJI Mic Mini 2S RX (stereo)",
@@ -46,7 +48,7 @@ var Models = []Model{
 		BulkOut:    0x04,
 		BulkIn:     0x84,
 		AltSetting: 1,
-		Note:       "unverified with this app; interface 4 and alternate setting 1 differ from the Mobile RX",
+		Note:       "unverified with this app; interface 4 and alternate setting 1 differ from the DMMR01 / DMMR02 receivers",
 	},
 	{
 		Name:       "DJI Mic Mini 2S RX (quadraphonic)",
@@ -56,7 +58,7 @@ var Models = []Model{
 		BulkOut:    0x04,
 		BulkIn:     0x84,
 		AltSetting: 1,
-		Note:       "unverified with this app; interface 4 and alternate setting 1 differ from the Mobile RX",
+		Note:       "unverified with this app; interface 4 and alternate setting 1 differ from the DMMR01 / DMMR02 receivers",
 	},
 }
 

@@ -30,6 +30,7 @@ func main() {
 		kind console.DemoKind
 	}{
 		{"live", console.DemoLive},
+		{"mobile", console.DemoMobile},
 		{"v1", console.DemoV1},
 		{"nointerface", console.DemoNoInterface},
 		{"nodriver", console.DemoNoDriver},

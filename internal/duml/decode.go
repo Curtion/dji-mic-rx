@@ -191,8 +191,9 @@ func decodeV2Status(s *State, f []byte) bool {
 	flags3 := f[48]
 	s.RX.GainDial = int(int8(f[22]))
 	s.RX.HasGain = true
-	// The Mic Mini 2 reports the receiver's own battery in bits 5..7 and its
-	// charging state in bit 4 of offset 21.
+	// A receiver with a battery reports it in bits 5..7 and its charging
+	// state in bit 4 of offset 21; the mobile receiver (DMMR02) has no
+	// battery and leaves both clear.
 	s.RX.BatteryGauge = int(f[21]>>5) & 0x07
 	s.RX.Charging = f[21]&0x10 != 0
 
