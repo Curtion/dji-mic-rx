@@ -2,9 +2,11 @@ package console
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
+	"dji-mic-rx/internal/duml"
 	"dji-mic-rx/internal/session"
 )
 
@@ -49,22 +51,28 @@ func (a *App) brand(c *ui.Context, p palette) {
 }
 
 // nav lists the pages. The selected one is marked by a lit bar rather than by
-// a filled block, the way a pressed button on a device reads.
+// a filled block, the way a pressed button on a device reads; the background
+// and the bar fade between items rather than switching in one frame.
 func (a *App) nav(c *ui.Context, p palette) {
 	ui.Column(c).Gap(2).Children(func() {
 		for i, pg := range pages {
 			selected := i == a.page
-			item := ui.Row(c).Gap(10).Padding(7, 8).Radius(7).
-				AlignItems(ui.Center).Cursor(ui.CursorPointer)
-			if selected {
+			item := ui.Row(c).Key("nav-"+pg.id).Gap(10).Padding(7, 8).Radius(6).
+				AlignItems(ui.Center).Cursor(ui.CursorPointer).
+				Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+			switch {
+			case selected:
 				item.Background(p.panelHi)
+			case item.Hovered():
+				item.Background(p.panelHi.Alpha(0.6))
 			}
 			item.Children(func() {
 				bar := p.signal
 				if !selected {
 					bar = ui.Transparent
 				}
-				ui.Box(c).Width(2).Height(16).Radius(1).Background(bar)
+				ui.Box(c).Width(2).Height(16).Radius(1).Background(bar).
+					Transition(ui.ElementTransition{Colors: true, Duration: 140 * time.Millisecond})
 				iconColor := p.inkDim
 				labelColor := p.inkDim
 				if selected {
@@ -87,7 +95,14 @@ func (a *App) linkStatus(c *ui.Context, p palette, snap session.Snapshot) {
 	ui.Column(c).Gap(8).Children(func() {
 		hairline(c, p)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ledDot(c, p.link, snap.Connected, 8)
+			dot := ledDot(c, p.link, snap.Connected, 8)
+			if !snap.Connected && !c.Preferences().ReduceMotion {
+				// A slow breath while the app is still looking for the
+				// receiver, like the standby light of a device that has not
+				// given up.
+				breath := dot.Loop("breath", 1800*time.Millisecond, ui.EaseInOut)
+				dot.Background(p.link.Alpha(0.2 + 0.45*breath))
+			}
 			ui.Text(c, a.rateText(snap)).FontSize(sizeUnit).TextColor(p.inkDim).
 				FontFeatures(tabular).SingleLine()
 			ui.Spacer(c)
@@ -123,14 +138,30 @@ func (a *App) rateText(snap session.Snapshot) string {
 	}
 }
 
-// content is the page column: its header, then the page itself.
+// pageTransition is how a page arrives and leaves as the rail switches: a
+// short rise and fade, so the change of context reads without travel. Only
+// the position channel is on: the column's height is the scroll view's
+// content, and animating it would drag the scroll extent along.
+var pageTransition = ui.ElementTransition{
+	Duration: 220 * time.Millisecond,
+	Ease:     ui.EaseOut,
+	Position: true,
+	Enter:    &ui.Motion{Y: 10},
+	Exit:     &ui.Motion{Y: -8},
+}
+
+// content is the page column: its header, then the page itself. Each page
+// keeps its own scroll position, and switching pages glides the content
+// rather than swapping it in one frame.
 func (a *App) content(c *ui.Context, p palette, snap session.Snapshot) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		a.header(c, p, snap)
 		hairline(c, p)
-		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Padding(20, 20).Gap(16).Children(func() {
-				switch pages[a.page].id {
+		ui.Scroll(c).Grow(1).TrackScroll(&a.scroll[a.page]).Children(func() {
+			page := pages[a.page]
+			ui.Column(c).Key("page-"+page.id).Padding(20, 20).Gap(16).
+				Transition(pageTransition).Children(func() {
+				switch page.id {
 				case "status":
 					a.statusPage(c, p, snap)
 				case "settings":
@@ -151,7 +182,7 @@ func (a *App) header(c *ui.Context, p palette, snap session.Snapshot) {
 	ui.Row(c).Padding(18, 20).Gap(12).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Gap(2).Children(func() {
 			ui.Text(c, page.title).FontSize(sizePage).FontWeight(600).TextColor(p.ink).SingleLine()
-			ui.Text(c, page.subtitle()).FontSize(sizeLabel).TextColor(p.inkDim).SingleLine()
+			ui.Text(c, a.pageSubtitle(snap)).FontSize(sizeLabel).TextColor(p.inkDim).SingleLine()
 		})
 		ui.Spacer(c)
 
@@ -189,13 +220,33 @@ func driverBadge(snap session.Snapshot, p palette) (text string, color ui.Color,
 	return "厂商接口未出现", p.signal, false
 }
 
-// subtitle is the page's one line of context.
-func (p page) subtitle() string {
-	switch p.id {
+// dialectOf returns the protocol version the receiver speaks, and whether it
+// has identified itself yet.
+func dialectOf(snap session.Snapshot) (duml.Dialect, bool) {
+	if !snap.State.DialectKnown {
+		return 0, false
+	}
+	return snap.State.Dialect, true
+}
+
+// pageSubtitle is the page's one line of context. The settings page names
+// the protocol it is showing, since the protocol decides that list.
+func (a *App) pageSubtitle(snap session.Snapshot) string {
+	switch pages[a.page].id {
 	case "status":
 		return "接收器与两支发射器的实时状态，由设备以约 10 次/秒主动推送"
 	case "settings":
-		return "写回接收器后立即生效；v1 固件没有的设置会写明原因"
+		dialect, known := dialectOf(snap)
+		switch {
+		case !snap.Connected:
+			return "连接接收器后，这里显示它固件支持的设置"
+		case !known:
+			return "正在读取固件版本"
+		case dialect == duml.V1:
+			return "初代 Mic Mini 的设置，写回后立即生效；不能在这里改的项目单独列出"
+		default:
+			return "全部设置可以直接调整，写回后立即生效"
+		}
 	default:
 		return "只给厂商接口安装 WinUSB，录音与按键接口保持系统驱动"
 	}

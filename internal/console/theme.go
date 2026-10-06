@@ -96,7 +96,7 @@ func theme(base *ui.Theme) (*ui.Theme, palette) {
 	t.Selection = p.signal.Alpha(0.3)
 	t.Focus = p.signal
 	t.Scrollbar = p.lineHi
-	t.Radius = 8
+	t.Radius = 6
 	t.Spacing = 4
 	t.FontSize = 14
 	return &t, p

@@ -8,6 +8,49 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// Every page of every demo situation must draw, and the rail must switch
+// pages: the frames after a switch run the page transitions, and a tester
+// panics on keys two siblings share, so this guards the views' keys.
+func TestPagesRender(t *testing.T) {
+	for _, kind := range []DemoKind{DemoLive, DemoV1, DemoNoInterface, DemoNoDriver} {
+		t.Run(situationName(kind), func(t *testing.T) {
+			app := New(NewDemo(kind))
+			tester := ui.NewTester(app.View, 1180, 820)
+			tester.SetScale(1)
+			tester.SetDark(true)
+			tester.Frame()
+			for _, step := range []struct {
+				label string
+				page  int
+			}{
+				{"设置", 1}, {"驱动", 2}, {"状态", 0}, {"驱动", 2},
+			} {
+				if err := tester.Click(step.label); err != nil {
+					t.Fatalf("click %q: %v", step.label, err)
+				}
+				tester.Frame()
+				tester.Frame()
+				if app.page != step.page {
+					t.Fatalf("click %q selected page %d, want %d", step.label, app.page, step.page)
+				}
+			}
+		})
+	}
+}
+
+func situationName(kind DemoKind) string {
+	switch kind {
+	case DemoLive:
+		return "live"
+	case DemoV1:
+		return "v1"
+	case DemoNoInterface:
+		return "no-interface"
+	default:
+		return "no-driver"
+	}
+}
+
 // The level ladder is the window's one moving part, so its geometry is worth
 // pinning down: a fixed number of steps that do not stretch to whatever width
 // the layout offers, with the number of lit steps following the level it was

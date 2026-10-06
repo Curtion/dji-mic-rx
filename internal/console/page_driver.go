@@ -17,7 +17,13 @@ func (a *App) driverPage(c *ui.Context, p palette, snap session.Snapshot) {
 	state := driverStatusFor(snap, p)
 	card(c, p, state.title, state.detail, func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ledDot(c, state.color, state.lit, 10)
+			// While the elevated installer runs, the state light becomes a
+			// working indicator, since what the card states is in flux.
+			if snap.Installing {
+				ui.Spinner(c)
+			} else {
+				ledDot(c, state.color, state.lit, 10)
+			}
 			ui.Text(c, state.summary).FontSize(sizeBody).TextColor(p.ink).Grow(1).
 				LineHeight(1.45)
 		})

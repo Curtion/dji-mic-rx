@@ -7,28 +7,72 @@ import (
 	"dji-mic-rx/internal/session"
 )
 
-// settingsPage shows every shared setting in one list, grouped by what it
-// affects. Every row is built from the setting registry, so a control exists
-// exactly when the receiver has a command for it, and says why when it does
-// not.
+// settingsPage shows the settings of the protocol the receiver speaks — and
+// only those. v1 and v2 get their own lists rather than one list with the
+// other version's gaps explained away; a receiver whose version is not known
+// yet gets a waiting card instead of a guess.
 func (a *App) settingsPage(c *ui.Context, p palette, snap session.Snapshot) {
-	if !snap.Connected {
-		card(c, p, "", "", func() {
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconInfo).FontSize(13).TextColor(p.inkFaint)
-				ui.Text(c, "接收器未连接，设置暂时只能查看。").
-					FontSize(sizeLabel).TextColor(p.inkFaint)
-			})
-		})
+	dialect, known := dialectOf(snap)
+	if !snap.Connected || !known {
+		a.waitingCard(c, p, snap)
+		return
 	}
 	for _, group := range []duml.Group{duml.GroupAudio, duml.GroupPower, duml.GroupDevice} {
-		a.settingsGroup(c, p, snap, group)
+		list := settingsInGroup(dialect, a.product(snap), group)
+		if len(list) == 0 {
+			continue
+		}
+		a.settingsGroup(c, p, snap, group, list)
 	}
+	if list := readOnlySettings(dialect); len(list) > 0 {
+		a.readOnlyGroup(c, p, snap, list)
+	}
+	a.handHeldCard(c, p, dialect)
+}
 
+// settingsInGroup returns the settings of one group this protocol can write,
+// in registry order. Per-transmitter settings live on the transmitter's card
+// and are never listed here.
+func settingsInGroup(dialect duml.Dialect, product string, group duml.Group) []duml.Setting {
+	var list []duml.Setting
+	for _, setting := range duml.Settings {
+		if setting.PerTransmitter || setting.Group != group {
+			continue
+		}
+		if !setting.Available(dialect, product) {
+			continue
+		}
+		list = append(list, setting)
+	}
+	return list
+}
+
+// readOnlySettings returns the states a protocol reports but has no command
+// to change — on v1, the transmitter's own button holds the pen.
+func readOnlySettings(dialect duml.Dialect) []duml.Setting {
+	if dialect != duml.V1 {
+		return nil
+	}
+	var list []duml.Setting
+	for _, setting := range duml.Settings {
+		if setting.ReadOnlyOnV1 && !setting.PerTransmitter {
+			list = append(list, setting)
+		}
+	}
+	return list
+}
+
+// handHeldCard is the card of things done on the device itself; the two
+// generations differ in how much of the gain dial the program can see.
+func (a *App) handHeldCard(c *ui.Context, p palette, dialect duml.Dialect) {
+	gain := "增益：转动接收器左上侧的拨轮，五档、每档 6 dB；程序只能读出当前位置。"
+	if dialect == duml.V1 {
+		gain = "增益：转动接收器左上侧的拨轮，五档、每档 6 dB；v1 固件不上报位置，以旋钮刻度为准。"
+	}
 	card(c, p, "可以在硬件上直接操作的事", "有些功能不需要这个程序", func() {
 		ui.Column(c).Gap(8).Children(func() {
 			for _, line := range []string{
-				"增益：转动接收器左上侧的拨轮，五档、每档 6 dB；程序只能读出当前位置。",
+				gain,
 				"单声道/立体声：双击接收器的配对键即可切换。",
 				"配对：发射器与接收器都长按配对键两秒。",
 			} {
@@ -44,50 +88,49 @@ func (a *App) settingsPage(c *ui.Context, p palette, snap session.Snapshot) {
 }
 
 // settingsGroup draws one section of the list.
-func (a *App) settingsGroup(c *ui.Context, p palette, snap session.Snapshot, group duml.Group) {
+func (a *App) settingsGroup(c *ui.Context, p palette, snap session.Snapshot, group duml.Group, settings []duml.Setting) {
 	card(c, p, string(group), "", func() {
-		first := true
-		for _, setting := range duml.Settings {
-			if setting.Group != group || setting.PerTransmitter {
-				continue
-			}
-			if !first {
+		for i, setting := range settings {
+			if i > 0 {
 				hairline(c, p)
 			}
-			first = false
 			a.settingRow(c, p, snap, setting)
 		}
 	})
 }
 
-// settingRow draws one setting: its name, what it does, and the control that
-// changes it — or, when it cannot be changed here, the reason.
-func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, setting duml.Setting) {
-	// While the protocol version is unknown, assume the older one: a control
-	// that appears a moment later is better than one that disappears.
-	dialect := snap.State.Dialect
-	if !snap.State.DialectKnown {
-		dialect = duml.V1
-	}
-	value := snap.State.Setting(setting.ID)
-
-	if !setting.Available(dialect, a.product(snap)) {
-		fieldRow(c, p, setting.Label, setting.Detail, func() {
-			unavailableNote(c, p, unavailableReason(setting, dialect))
-		})
-		return
-	}
-
-	if setting.ReadOnlyOnV1 && dialect == duml.V1 {
-		current, known := setting.Option(value)
-		fieldRow(c, p, setting.Label, setting.Detail, func() {
-			if known {
-				pill(c, p, current.Label, p.inkDim)
+// readOnlyGroup lists the states only the hardware can change, as readings
+// rather than as controls.
+func (a *App) readOnlyGroup(c *ui.Context, p palette, snap session.Snapshot, settings []duml.Setting) {
+	card(c, p, "在发射器上调整", "程序能读出状态，改变要按发射器自己的按键", func() {
+		for i, setting := range settings {
+			if i > 0 {
+				hairline(c, p)
 			}
-			unavailableNote(c, p, "v1 固件要按发射器的电源键切换")
-		})
-		return
+			value := snap.State.Setting(setting.ID)
+			fieldRow(c, p, setting.Label, readOnlyHint(setting), func() {
+				if option, ok := setting.Option(value); ok {
+					pill(c, p, option.Label, p.inkDim)
+					return
+				}
+				ui.Text(c, "—").FontSize(sizeLabel).TextColor(p.inkFaint)
+			})
+		}
+	})
+}
+
+// readOnlyHint says where the device changes the value instead.
+func readOnlyHint(setting duml.Setting) string {
+	if setting.ID == "noise-cancel-power" {
+		return "短按发射器的电源键切换"
 	}
+	return "在发射器上调整"
+}
+
+// settingRow draws one setting: its name, what it does, and the control that
+// changes it. Every row the page lists is one the protocol can write.
+func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, setting duml.Setting) {
+	value := snap.State.Setting(setting.ID)
 
 	switch setting.Kind {
 	case duml.KindToggle:
@@ -125,16 +168,4 @@ func (a *App) settingRow(c *ui.Context, p palette, snap session.Snapshot, settin
 			}
 		})
 	}
-}
-
-// unavailableReason explains why a setting is not offered, naming the firmware
-// or the model that has it.
-func unavailableReason(setting duml.Setting, dialect duml.Dialect) string {
-	if setting.V1 == 0 {
-		return "需要 v2 固件（DJI Mic Mini 2）"
-	}
-	if setting.RequiresProduct != "" {
-		return "只有 " + setting.RequiresProduct + " 支持"
-	}
-	return "当前固件不支持"
 }

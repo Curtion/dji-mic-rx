@@ -55,6 +55,10 @@ type App struct {
 	// page is the index into pages.
 	page int
 
+	// scroll keeps each page's own place in the scroll view, so moving
+	// between pages and back does not lose it.
+	scroll []ui.ScrollState
+
 	// mu guards the messages written from the goroutines that send commands
 	// and run installers.
 	mu          sync.Mutex
@@ -65,7 +69,7 @@ type App struct {
 // New returns the app for a source: the device session in the app, or a
 // stand-in in tests.
 func New(sess Source) *App {
-	return &App{sess: sess}
+	return &App{sess: sess, scroll: make([]ui.ScrollState, len(pages))}
 }
 
 // ShowPage selects a page by id, for the driver badge to send the user to

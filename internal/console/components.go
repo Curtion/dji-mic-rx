@@ -3,6 +3,7 @@ package console
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -24,10 +25,11 @@ func ledDot(c *ui.Context, color ui.Color, lit bool, size float32) *ui.Element {
 }
 
 // pill is a short status label: a word in the colour of the state it names,
-// on a wash of the same colour. It never uses all caps, so it stays readable
-// in Chinese.
+// on a wash of the same colour. A plate on the instrument rather than a web
+// badge: a small radius instead of a capsule, and no all caps, so it stays
+// readable in Chinese.
 func pill(c *ui.Context, p palette, text string, color ui.Color) *ui.Element {
-	return ui.Row(c).Padding(3, 8).Radius(999).Background(color.Alpha(0.14)).Children(func() {
+	return ui.Row(c).Padding(3, 8).Radius(6).Background(color.Alpha(0.14)).Children(func() {
 		ui.Text(c, text).FontSize(sizeUnit).FontWeight(600).TextColor(color).SingleLine()
 	})
 }
@@ -51,8 +53,11 @@ func batteryGlyph(c *ui.Context, p palette, pct int, known bool, charging bool) 
 			Border(1, p.lineHi).Background(p.sunken)
 		body.Children(func() {
 			if known && pct > 0 {
+				// The fill glides to a new reading instead of jumping, the
+				// way the gauge on the hardware would.
 				ui.Box(c).WidthPercent(float32(pct)).FillHeight().
-					Background(color).Radius(2)
+					Background(color).Radius(2).Key("battery-fill").
+					Transition(ui.ElementTransition{Size: true, Colors: true, Duration: 300 * time.Millisecond})
 			}
 			if charging {
 				ui.Icon(c, iconBolt).FontSize(11).TextColor(p.ink).
@@ -73,13 +78,22 @@ const ladderSegments = 24
 // The level is in the device's own units, so the ladder is scaled to the
 // range the receiver reports rather than pretending to be dBFS; the number
 // beside it is the raw reading.
+//
+// The ladder has meter ballistics: the lit run snaps up with the input and
+// eases back down over half a second, so a short peak stays readable instead
+// of flickering at the rate the receiver pushes.
 func levelLadder(c *ui.Context, p palette, fraction float64, live bool) *ui.Element {
-	bands := [3]ui.Color{p.link, p.signal, p.alarm}
-	lit := 0
+	row := ui.Row(c).Gap(2).Key("level")
+	target := float32(0)
 	if live {
-		lit = ladderLit(fraction)
+		target = float32(fraction)
 	}
-	return ui.Row(c).Gap(2).Children(func() {
+	rise := row.Animate("level-rise", target, 80*time.Millisecond)
+	fall := row.AnimateWith("level-fall", target, 550*time.Millisecond, ui.EaseOut)
+	lit := ladderLit(float64(max(rise, fall)))
+
+	bands := [3]ui.Color{p.link, p.signal, p.alarm}
+	row.Children(func() {
 		for i := 0; i < ladderSegments; i++ {
 			band := 0
 			switch {
@@ -95,6 +109,7 @@ func levelLadder(c *ui.Context, p palette, fraction float64, live bool) *ui.Elem
 			ui.Box(c).Width(5).Height(12).Radius(1.5).Background(color)
 		}
 	})
+	return row
 }
 
 // ladderLit is how many steps of the ladder a level lights. It is a function
@@ -129,9 +144,22 @@ func specRow(c *ui.Context, p palette, label, value string, mono bool) *ui.Eleme
 	})
 }
 
+// stripStat is one fact of a device strip: a quiet label over its value,
+// left aligned so a row of facts reads like a nameplate.
+func stripStat(c *ui.Context, p palette, label, value string, mono bool) *ui.Element {
+	return ui.Column(c).Gap(3).Children(func() {
+		ui.Text(c, label).FontSize(sizeUnit).TextColor(p.inkFaint).SingleLine()
+		valueText := ui.Text(c, value).FontSize(sizeBody).TextColor(p.ink).
+			SingleLine().FontFeatures(tabular)
+		if mono {
+			valueText.Font("monospace").Selectable()
+		}
+	})
+}
+
 // card is a panel: a plate on the chassis with a title and its contents.
 func card(c *ui.Context, p palette, title, detail string, body func()) *ui.Element {
-	return ui.Column(c).Padding(16).Gap(12).Radius(10).
+	return ui.Column(c).Padding(16).Gap(12).Radius(6).
 		Background(p.panel).Border(1, p.line).Children(func() {
 		if title != "" || detail != "" {
 			ui.Column(c).Gap(2).Children(func() {
@@ -161,8 +189,8 @@ func fieldRow(c *ui.Context, p palette, label, detail string, control func()) *u
 	})
 }
 
-// unavailableNote marks a setting this firmware or this model has no command
-// for, so a missing control is explained rather than simply absent.
+// unavailableNote marks a control that cannot be used right now, so the gap
+// is explained rather than simply blank.
 func unavailableNote(c *ui.Context, p palette, reason string) *ui.Element {
 	return ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, iconInfo).FontSize(13).TextColor(p.inkFaint)
