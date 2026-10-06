@@ -1,0 +1,11 @@
+# Build output
+/dji-mic-rx.exe
+/dji-mic-rx
+
+# Go workspace files
+*.test
+*.out
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
