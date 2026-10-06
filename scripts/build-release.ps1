@@ -10,7 +10,7 @@
   2. 用 Windows SDK 的 makecat 生成目录文件，signtool 签名
   3. 把 .inf / .cat（自签名时还有 .cer）放进 internal\usb\package\，
      下一步 go build 会把它们嵌进 exe
-  4. go build -o dji-mic-rx.exe
+  4. go build -trimpath -o dji-mic-rx.exe
 
 用户机器上：程序安装驱动时只做 pnputil 导入；自签名的包会顺带把 .cer
 装进本机信任（in-box 的 certutil），卸载时移除。用公共 CA 证书签名时
@@ -168,7 +168,8 @@ if ($SkipBuild) {
 Write-Host "== 4/4 构建 exe" -ForegroundColor Cyan
 Push-Location $root
 try {
-  & go build -o dji-mic-rx.exe .
+  # -trimpath：不把本机源码路径嵌进 exe
+  & go build -trimpath -o dji-mic-rx.exe .
   if ($LASTEXITCODE -ne 0) { throw "go build 失败（退出码 $LASTEXITCODE）" }
 } finally { Pop-Location }
 

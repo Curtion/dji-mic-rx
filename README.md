@@ -50,3 +50,7 @@ scripts\build.cmd
 
 - [mygo](https://github.com/egoist/mygo)：原生 UI 工具包。
 - [ShadowBitBasher/DJI-Mic-Control](https://github.com/ShadowBitBasher/DJI-Mic-Control)、[usokawa/dji-mic-mo](https://github.com/usokawa/dji-mic-mo)：协议参考。
+
+## 许可证
+
+本项目以 [MIT 许可证](LICENSE) 开源。
