@@ -14,6 +14,7 @@ const (
 	svgBolt     = `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13.4 2 5 13.2h5.1L9.8 22l8.4-11.2h-5.1z"/></svg>`
 	svgWarning  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5 2.8 20h18.4z"/><path d="M12 10v4.2"/><path d="M12 17.4h.01"/></svg>`
 	svgRefresh  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5a8 8 0 1 0-2.4 6.3"/><path d="M20 4.5v7h-7"/></svg>`
+	svgDownload = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>`
 )
 
 // The icons are parsed once, as the toolkit asks, never inside the view.
@@ -25,4 +26,5 @@ var (
 	iconBolt     = ui.MustParseSVG([]byte(svgBolt))
 	iconWarning  = ui.MustParseSVG([]byte(svgWarning))
 	iconRefresh  = ui.MustParseSVG([]byte(svgRefresh))
+	iconDownload = ui.MustParseSVG([]byte(svgDownload))
 )

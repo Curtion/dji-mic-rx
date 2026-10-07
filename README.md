@@ -39,7 +39,17 @@ go run .
 scripts\build.cmd
 ```
 
-生成包含驱动包的单个 exe，默认使用自签名证书。
+产物在 `build\windows-amd64\`：exe、NSIS 安装包，以及自动更新文件。驱动包默认用自签名证书签名。
+
+### 发布与自动更新
+
+应用启动时检查更新（侧栏底部显示当前版本与更新状态），更新包用 ed25519 密钥签名，公钥内置在 `mygo.json`。发布流程：
+
+1. 把 `mygo.json` 的 `version` 改成新版本号，提交。
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`（标签必须与版本一致，CI 会校验）。
+3. GitHub Actions 构建 exe、安装包与更新文件，上传到草稿 Release 并自动发布；旧版本随即能发现更新。
+
+CI 需要仓库 secret `MYGO_UPDATER_PRIVATE_KEY`（更新签名私钥，由 `go tool mygo keygen` 生成）。本地手动发布：`scripts\build.cmd -Upload`（需要 gh 登录），再到 GitHub 发布草稿。
 
 ## 注意事项
 

@@ -9,12 +9,17 @@
   1. 在当前用户证书库里找到（没有就创建）自签名代码签名证书
   2. 用 Windows SDK 的 makecat 生成目录文件，signtool 签名
   3. 把 .inf / .cat（自签名时还有 .cer）放进 internal\usb\package\，
-     下一步 go build 会把它们嵌进 exe
-  4. 嵌入应用图标，构建不带终端窗口的 dji-mic-rx.exe
+     下一步构建会把它们嵌进 exe
+  4. 用 go tool mygo build 构建 exe、NSIS 安装包和自动更新文件
+     （mygo.json 提供版本号与更新配置；输出在 build\windows-amd64\）
 
 用户机器上：程序安装驱动时只做 pnputil 导入；自签名的包会顺带把 .cer
 装进本机信任（in-box 的 certutil），卸载时移除。用公共 CA 证书签名时
 （-Pfx 或 -Thumbprint）不会导出 .cer，用户机器无需任何信任变更。
+
+自动更新：exe 由 mygo 的更新密钥签名（ed25519，与代码签名证书是两回事）。
+私钥取 MYGO_UPDATER_PRIVATE_KEY，缺省时读 %APPDATA%\mygo\update-keys\
+mygo-update.key（go tool mygo keygen 生成）；都没有就只构建、不签更新包。
 
 可选参数：
   -Pfx <文件> -PfxPassword <密码>   用 PFX 里的证书签名（公共 CA 或自购证书）
@@ -23,6 +28,7 @@
   -TimestampServer <URL>            默认 http://timestamp.digicert.com
   -NoTimestamp                      不加时间戳（离线时用）
   -SkipBuild                        只签名，不构建 exe
+  -Upload                           构建后上传到 GitHub 草稿 Release（需要 gh 登录）
 #>
 [CmdletBinding()]
 param(
@@ -32,7 +38,8 @@ param(
   [string]$Subject = 'CN=DJI Mic Control (self-signed)',
   [string]$TimestampServer = 'http://timestamp.digicert.com',
   [switch]$NoTimestamp,
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$Upload
 )
 
 # PowerShell 7 没有 PKI 模块和 Cert: 盘，遇到就换回 Windows PowerShell 5.1 重跑。
@@ -165,21 +172,41 @@ if ($SkipBuild) {
   exit 0
 }
 
-Write-Host "== 4/4 构建 exe" -ForegroundColor Cyan
+Write-Host "== 4/4 构建 exe、安装包与更新文件" -ForegroundColor Cyan
 Push-Location $root
 try {
-  $arch = & go env GOARCH
-  if ($LASTEXITCODE -ne 0) { throw '无法读取 Go 目标架构' }
-  & go run github.com/akavel/rsrc@v0.10.2 -arch $arch -ico assets/app.ico -o "rsrc_windows_$arch.syso"
-  if ($LASTEXITCODE -ne 0) { throw "图标资源生成失败（退出码 $LASTEXITCODE）" }
-  # -trimpath：不把本机源码路径嵌进 exe
-  & go build -trimpath -ldflags '-H=windowsgui' -o dji-mic-rx.exe .
-  if ($LASTEXITCODE -ne 0) { throw "go build 失败（退出码 $LASTEXITCODE）" }
+  # 残留的 rsrc 资源会顶掉 mygo 自带的图标/版本信息/DPI 清单，先清掉。
+  Remove-Item (Join-Path $root 'rsrc_windows_*.syso') -Force -ErrorAction SilentlyContinue
+
+  $version = (Get-Content (Join-Path $root 'mygo.json') -Raw | ConvertFrom-Json).version
+  Write-Host "   版本：$version（mygo.json）"
+  $tag = & git describe --tags --exact-match HEAD 2>$null
+  if ($tag -and $tag -ne "v$version") {
+    Write-Host "   警告：HEAD 的标签是 $tag，与 mygo.json 的 $version 不一致" -ForegroundColor Yellow
+  }
+
+  if (-not $env:MYGO_UPDATER_PRIVATE_KEY) {
+    $keyFile = Join-Path $env:APPDATA 'mygo\update-keys\mygo-update.key'
+    if (Test-Path $keyFile) {
+      $env:MYGO_UPDATER_PRIVATE_KEY = (Get-Content $keyFile -Raw).Trim()
+      Write-Host "   更新签名：$keyFile"
+    } else {
+      Write-Host "   没有更新签名私钥，本次不产出更新文件（go tool mygo keygen 生成）" -ForegroundColor Yellow
+    }
+  }
+
+  $buildArgs = @('build')
+  if ($Upload) { $buildArgs += '-upload' }
+  & go tool mygo @buildArgs
+  if ($LASTEXITCODE -ne 0) { throw "mygo build 失败（退出码 $LASTEXITCODE）" }
 } finally { Pop-Location }
 
-$exe = Join-Path $root 'dji-mic-rx.exe'
+$built = Join-Path $root 'build\windows-amd64'
 Write-Host ""
-Write-Host "完成：$exe（$([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB）" -ForegroundColor Green
+Get-ChildItem $built -File -ErrorAction SilentlyContinue | ForEach-Object {
+  Write-Host ("   " + $_.Name + "  " + [math]::Round($_.Length / 1MB, 1) + " MB")
+}
+Write-Host "完成：产物在 $built" -ForegroundColor Green
 if ($useSelfSigned) {
   Write-Host "这个 exe 内置了自签名证书签名的驱动包：目标机器安装驱动时会把证书装进本机信任，卸载时移除。"
 } else {

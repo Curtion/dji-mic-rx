@@ -64,6 +64,9 @@ type App struct {
 	notice      string
 	noticeError bool
 	pending     map[settingKey]bool
+
+	// updater tracks self-update checks; it guards its own state.
+	updater updater
 }
 
 type settingKey struct {

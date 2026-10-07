@@ -46,7 +46,9 @@ func main() {
 			Content:         ui.View(app.View),
 		})
 		sess.SetOnChange(win.Invalidate)
+		app.SetInvalidate(win.Invalidate)
 		sess.Start()
+		app.CheckUpdates()
 	})
 
 	if err := mygo.App.Run(); err != nil {

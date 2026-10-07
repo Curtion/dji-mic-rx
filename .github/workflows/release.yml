@@ -27,14 +27,38 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Build signed driver package and executable
-        run: ./scripts/build-release.ps1
+      - name: Check the tag matches mygo.json
+        run: |
+          $version = (Get-Content mygo.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "mygo.json 的版本 $version 与标签 $env:GITHUB_REF_NAME 不一致"
+          }
 
       - name: Test
         run: go test ./...
 
-      - name: Publish release
+      - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release create "$env:GITHUB_REF_NAME" ./dji-mic-rx.exe --verify-tag --generate-notes --title "$env:GITHUB_REF_NAME"
+        run: |
+          gh release view "$env:GITHUB_REF_NAME" --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:GITHUB_REF_NAME" --repo "$env:GITHUB_REPOSITORY" --draft --verify-tag --title "$env:GITHUB_REF_NAME" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "创建草稿 Release 失败" }
+          }
+
+      - name: Build signed driver package, installer and updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: ./scripts/build-release.ps1 -Upload
+
+      - name: Upload the portable executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" ./build/windows-amd64/dji-mic-rx.exe --repo "$env:GITHUB_REPOSITORY" --clobber
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$env:GITHUB_REF_NAME" --repo "$env:GITHUB_REPOSITORY" --draft=false

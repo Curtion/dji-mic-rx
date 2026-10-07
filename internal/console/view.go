@@ -36,6 +36,7 @@ func (a *App) rail(c *ui.Context, p palette, snap session.Snapshot) {
 			a.nav(c, p)
 			ui.Spacer(c)
 			a.linkStatus(c, p, snap)
+			a.updateStatus(c, p)
 		})
 }
 

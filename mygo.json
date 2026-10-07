@@ -1,0 +1,11 @@
+{
+  "name": "dji-mic-rx",
+  "identifier": "com.github.curtion.djimicrx",
+  "version": "1.0.5",
+  "icon": "resources/icon.png",
+  "out": "build",
+  "updates": {
+    "publicKey": "mkT16+MUABe8Bz8Zr7fS5Px6+8aaBZqoWyY728aDspY=",
+    "github": "Curtion/dji-mic-rx"
+  }
+}
