@@ -13,10 +13,6 @@ import (
 	"dji-mic-rx/internal/session"
 )
 
-// The settings page belongs to one protocol and one end of the link: a v1
-// receiver must not be shown v2-only settings (with or without an
-// explanation), v2 must not carry v1's read-only special cases, and the
-// transmitters' settings and the receiver's go to separate cards.
 func TestSettingsSplitByProtocol(t *testing.T) {
 	wantV1TX := []string{"noise-cancel", "low-cut", "mic-leds"}
 	wantV1RX := []string{"stereo", "safety-track", "clip-limiter", "auto-off-15m", "camera-power", "plug-free"}
@@ -29,40 +25,72 @@ func TestSettingsSplitByProtocol(t *testing.T) {
 	if got := writableIDs(duml.V1, "DJI Mic Mini 2", false); !slices.Equal(got, wantV1RX) {
 		t.Errorf("v1 receiver settings = %v, want %v", got, wantV1RX)
 	}
-	if got := writableIDs(duml.V2, "DJI Mic Mini 2", true); !slices.Equal(got, wantV2TX) {
+	if got := writableIDs(duml.V2, "DJI Mic Mini", true); !slices.Equal(got, wantV2TX) {
 		t.Errorf("v2 transmitter settings = %v, want %v", got, wantV2TX)
 	}
-	if got := writableIDs(duml.V2, "DJI Mic Mini 2", false); !slices.Equal(got, wantV2RX) {
+	if got := writableIDs(duml.V2, "DJI Mic Mini", false); !slices.Equal(got, wantV2RX) {
 		t.Errorf("v2 receiver settings = %v, want %v", got, wantV2RX)
 	}
 
-	// The states v1 reports without a command go to the read-only card
-	// instead of a list, and only v1 has any.
-	if got := readOnlyIDs(duml.V1); !slices.Equal(got, []string{"noise-cancel-power"}) {
+	if got := readOnlyIDs(duml.V1, "DJI Mic Mini"); !slices.Equal(got, []string{"noise-cancel-power"}) {
 		t.Errorf("v1 read-only = %v, want [noise-cancel-power]", got)
 	}
-	if got := readOnlyIDs(duml.V2); len(got) != 0 {
+	if got := readOnlyIDs(duml.V2, "DJI Mic Mini"); len(got) != 0 {
 		t.Errorf("v2 read-only = %v, want none", got)
+	}
+	if got := writableIDs(duml.V2, "DJI Mic Mini 2", true); !slices.Equal(got, wantV2TX[3:]) {
+		t.Errorf("mobile transmitter settings = %v, want %v", got, wantV2TX[3:])
+	}
+	if got := writableIDs(duml.V2, "DJI Mic Mini 2", false); !slices.Equal(got, []string{"stereo", "safety-track", "clip-limiter", "plug-free"}) {
+		t.Errorf("mobile receiver settings = %v", got)
+	}
+	if got := readOnlyIDs(duml.V2, "DJI Mic Mini 2"); !slices.Equal(got, []string{"noise-cancel", "noise-cancel-power"}) {
+		t.Errorf("mobile read-only = %v, want noise strength and power", got)
 	}
 }
 
-// writableIDs lists the settings one card of the settings page would draw,
-// in the page's order: the transmitters' list or the receiver's, in registry
-// order inside.
 func writableIDs(dialect duml.Dialect, product string, transmitters bool) []string {
 	var ids []string
 	for _, setting := range settingsFor(dialect, product, transmitters) {
-		ids = append(ids, setting.ID)
+		if setting.Available(dialect, product) {
+			ids = append(ids, setting.ID)
+		}
 	}
 	return ids
 }
 
-func readOnlyIDs(dialect duml.Dialect) []string {
+func readOnlyIDs(dialect duml.Dialect, product string) []string {
 	var ids []string
-	for _, setting := range readOnlySettings(dialect) {
-		ids = append(ids, setting.ID)
+	for _, setting := range settingsFor(dialect, product, true) {
+		if setting.ReadOnlyReason(dialect, product) != "" {
+			ids = append(ids, setting.ID)
+		}
 	}
 	return ids
+}
+
+func TestReadOnlyNoiseRowsFollowDeviceState(t *testing.T) {
+	source := NewDemo(DemoMobile)
+	app := New(source)
+	tester := ui.NewTester(func(c *ui.Context) {
+		_, p := theme(c.Theme())
+		snap := source.Snapshot()
+		app.settingsSection(c, p, snap, "发射器设置", "对两支发射器一起生效", settingsFor(snap.State.Dialect, snap.State.RX.Name, true))
+	}, 1000, 900)
+	tester.Frame()
+	for _, label := range []string{"发射器设置", "降噪强度", "降噪开关", "强", "开启"} {
+		if !tester.HasText(label) {
+			t.Errorf("transmitter card missing %s", label)
+		}
+	}
+	source.mu.Lock()
+	source.snap.State.Settings["noise-cancel"] = "basic"
+	source.snap.State.Settings["noise-cancel-power"] = "off"
+	source.mu.Unlock()
+	tester.Frame()
+	if !tester.HasText("普通") || !tester.HasText("关闭") {
+		t.Fatal("read-only rows did not reflect device updates")
+	}
 }
 
 type delayedSettings struct {

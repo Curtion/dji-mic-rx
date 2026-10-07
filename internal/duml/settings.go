@@ -82,8 +82,17 @@ func (s Setting) Command(d Dialect) (cmd uint16, target Target, ok bool) {
 	return s.V1, TargetRX, true
 }
 
-// Available reports whether a device can use this setting at all.
+// Available reports whether a device can write this setting.
 func (s Setting) Available(d Dialect, product string) bool {
+	if s.ReadOnlyReason(d, product) != "" {
+		return false
+	}
+	if d == V2 && product == "DJI Mic Mini 2" {
+		switch s.ID {
+		case "noise-cancel-button", "auto-off-15m", "camera-power":
+			return false
+		}
+	}
 	if _, _, ok := s.Command(d); !ok {
 		return false
 	}
@@ -91,6 +100,17 @@ func (s Setting) Available(d Dialect, product string) bool {
 		return false
 	}
 	return true
+}
+
+func (s Setting) ReadOnlyReason(d Dialect, product string) string {
+	// DMMR02 identifies itself as "DJI Mic Mini 2" on the wire.
+	if d == V2 && product == "DJI Mic Mini 2" && (s.ID == "noise-cancel" || s.ID == "noise-cancel-power") {
+		return "请拨动接收器的 O / L / H 开关：O 关闭、L 普通、H 强，软件仅显示当前状态"
+	}
+	if d == V1 && s.ReadOnlyOnV1 {
+		return "短按发射器的电源键切换"
+	}
+	return ""
 }
 
 // Option returns the option with the given value slug.

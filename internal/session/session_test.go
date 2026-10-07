@@ -75,6 +75,7 @@ func testSession(timeout time.Duration) (*Session, *testConnection) {
 	s.snapshot.State.DialectKnown = true
 	s.snapshot.State.Settings["low-cut"] = "off"
 	s.snapshot.State.TX[0].Present = true
+	s.snapshot.State.TX[0].Name = "DJI Mic Mini 2"
 	s.snapshot.State.TX[0].VoiceTone = "standard"
 	return s, c
 }
@@ -192,5 +193,58 @@ func TestSendFailureKeepsDeviceValue(t *testing.T) {
 				t.Fatal("failed command still pending")
 			}
 		})
+	}
+}
+
+func TestMobileReceiverRejectsNoiseWrites(t *testing.T) {
+	for _, id := range []string{"noise-cancel", "noise-cancel-power"} {
+		for _, unit := range []int{0, 1} {
+			s, conn := testSession(10 * time.Millisecond)
+			s.snapshot.State.RX.Name = "DJI Mic Mini 2"
+			setting, _ := duml.SettingByID(id)
+			value := setting.Options[0].Value
+			var err error
+			if unit == 0 {
+				err = s.Send(id, value)
+			} else {
+				err = s.SendToTransmitter(id, value, unit)
+			}
+			if err == nil || !strings.Contains(err.Error(), "O / L / H") {
+				t.Errorf("%s unit %d: expected hardware switch hint, got %v", id, unit, err)
+			}
+			if len(conn.written) != 0 || len(s.pending) != 0 {
+				t.Errorf("%s unit %d: read-only setting sent to device", id, unit)
+			}
+		}
+	}
+}
+
+func TestMobileReceiverRejectsUnsupportedSettings(t *testing.T) {
+	for _, id := range []string{"noise-cancel-button", "auto-off-15m", "camera-power"} {
+		s, conn := testSession(10 * time.Millisecond)
+		s.snapshot.State.RX.Name = "DJI Mic Mini 2"
+		if err := s.Send(id, "on"); err == nil || !strings.Contains(err.Error(), "不可用") {
+			t.Errorf("%s: expected unavailable error, got %v", id, err)
+		}
+		if len(conn.written) != 0 || len(s.pending) != 0 {
+			t.Errorf("%s: unsupported command sent to device", id)
+		}
+	}
+}
+
+func TestVoiceToneValidatesTargetProduct(t *testing.T) {
+	for _, unit := range []int{0, 1} {
+		s, conn := testSession(10 * time.Millisecond)
+		s.snapshot.State.RX.Name = "DJI Mic Mini 2"
+		s.snapshot.State.TX[0].Name = "DJI Mic Mini"
+		var err error
+		if unit == 0 {
+			err = s.Send("voice-tone", "bright")
+		} else {
+			err = s.SendToTransmitter("voice-tone", "bright", unit)
+		}
+		if err == nil || len(conn.written) != 0 {
+			t.Errorf("unit %d: unsupported voice tone reached device: %v", unit, err)
+		}
 	}
 }

@@ -73,6 +73,9 @@ func TestBatteryRowsFollowTheGauge(t *testing.T) {
 	if !mobile.HasText("由 USB-C 供电") {
 		t.Error("the mobile receiver page does not say the receiver is USB-C powered")
 	}
+	if mobile.HasText("增益旋钮位置") || !mobile.HasText("接收器增益") {
+		t.Error("mobile receiver still presents a physical gain dial")
+	}
 
 	live := render(DemoLive)
 	if live.HasText("电量未知") {
@@ -104,6 +107,24 @@ func TestSettingsPageFilesListsByDevice(t *testing.T) {
 			for _, title := range []string{"发射器设置", "接收器设置"} {
 				if !tester.HasText(title) {
 					t.Errorf("settings page has no card titled %q", title)
+				}
+			}
+			if tester.HasText("在设备上调整") {
+				t.Error("read-only settings still have a separate card")
+			}
+			for _, label := range []string{"降噪强度", "降噪开关"} {
+				if !tester.HasText(label) {
+					t.Errorf("settings page lost %s", label)
+				}
+			}
+			if kind == DemoMobile {
+				if tester.HasText("单声道/立体声：双击接收器的配对键即可切换。") {
+					t.Error("mobile receiver shows standard receiver button instructions")
+				}
+				for _, label := range []string{"按键切换降噪", "接收器自动关机", "跟随相机开关机"} {
+					if tester.HasText(label) {
+						t.Errorf("mobile receiver exposes unsupported %s", label)
+					}
 				}
 			}
 		})

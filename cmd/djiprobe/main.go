@@ -235,6 +235,15 @@ func sendSetting(conn *usb.Conn, state duml.State, spec string) error {
 	if !known {
 		return fmt.Errorf("未知设置 %q", id)
 	}
+	if reason := setting.ReadOnlyReason(state.Dialect, state.RX.Name); reason != "" {
+		return fmt.Errorf("%s：%s", setting.Label, reason)
+	}
+	if setting.PerTransmitter {
+		return fmt.Errorf("%s 需要指定发射器，请在控制台对应的发射器卡片中调整", setting.Label)
+	}
+	if !setting.Available(state.Dialect, state.RX.Name) {
+		return fmt.Errorf("%s 在当前设备上不可用", setting.Label)
+	}
 	command, target, ok := setting.Command(state.Dialect)
 	if !ok {
 		return fmt.Errorf("%s 在当前固件（%s）上没有命令", setting.Label, state.Dialect)

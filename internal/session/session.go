@@ -512,6 +512,22 @@ func (s *Session) send(settingID, value string, unit int) error {
 		s.mu.Unlock()
 		return errors.New("接收器未连接")
 	}
+	if reason := setting.ReadOnlyReason(state.Dialect, state.RX.Name); reason != "" {
+		s.mu.Unlock()
+		return fmt.Errorf("%s：%s", setting.Label, reason)
+	}
+	product := state.RX.Name
+	if setting.PerTransmitter {
+		if unit == 0 {
+			s.mu.Unlock()
+			return fmt.Errorf("%s 需要指定发射器", setting.Label)
+		}
+		product = state.TX[unit-1].Name
+	}
+	if !setting.Available(state.Dialect, product) {
+		s.mu.Unlock()
+		return fmt.Errorf("%s 在当前设备上不可用", setting.Label)
+	}
 	command, target, ok := setting.Command(state.Dialect)
 	if !ok {
 		s.mu.Unlock()

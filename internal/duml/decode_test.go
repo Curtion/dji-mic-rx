@@ -428,3 +428,33 @@ func TestSettingRegistryIsConsistent(t *testing.T) {
 		t.Error("voice tone has no v1 command")
 	}
 }
+
+func TestMobileReceiverNoiseSettingsAreReadOnly(t *testing.T) {
+	for _, id := range []string{"noise-cancel", "noise-cancel-power"} {
+		setting, _ := SettingByID(id)
+		if setting.Available(V2, "DJI Mic Mini 2") {
+			t.Errorf("mobile receiver exposes writable %s", id)
+		}
+		for _, product := range []string{"DJI Mic Mini", "DJI Mic Mini 2S"} {
+			if !setting.Available(V2, product) {
+				t.Errorf("%s lost writable %s", product, id)
+			}
+		}
+	}
+	setting, _ := SettingByID("low-cut")
+	if !setting.Available(V2, "DJI Mic Mini 2") {
+		t.Fatal("mobile receiver lost low-cut control")
+	}
+}
+
+func TestMobileReceiverUnsupportedSettings(t *testing.T) {
+	for _, id := range []string{"noise-cancel-button", "auto-off-15m", "camera-power"} {
+		setting, _ := SettingByID(id)
+		if setting.Available(V2, "DJI Mic Mini 2") {
+			t.Errorf("mobile receiver exposes unsupported %s", id)
+		}
+		if !setting.Available(V2, "DJI Mic Mini") {
+			t.Errorf("standard receiver lost %s", id)
+		}
+	}
+}

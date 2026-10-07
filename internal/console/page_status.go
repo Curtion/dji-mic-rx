@@ -70,11 +70,18 @@ func (a *App) receiverCard(c *ui.Context, p palette, snap session.Snapshot) *ui.
 	return card(c, p, "接收器", "USB-C 连电脑", func() {
 		a.linkLine(c, p, snap.Connected, a.deviceName(snap))
 
+		gainLabel := "增益旋钮位置"
+		mobile := snap.State.RX.Name == "DJI Mic Mini 2"
+		if mobile {
+			gainLabel = "接收器增益"
+		}
 		if snap.State.RX.HasGain {
-			metric(c, p, gainText(snap.State.RX.GainDial), "dB", "增益旋钮位置", p.ink)
-			a.dialScale(c, p, snap.State.RX.GainDial)
+			metric(c, p, gainText(snap.State.RX.GainDial), "dB", gainLabel, p.ink)
+			if !mobile {
+				a.dialScale(c, p, snap.State.RX.GainDial)
+			}
 		} else {
-			metric(c, p, "—", "", "增益旋钮位置", p.inkFaint)
+			metric(c, p, "—", "", gainLabel, p.inkFaint)
 		}
 
 		hairline(c, p)
