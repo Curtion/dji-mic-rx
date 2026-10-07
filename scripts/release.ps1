@@ -22,9 +22,10 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Push-Location $root
 try {
-  function Invoke-Git([string[]]$CmdArgs) {
-    & git @CmdArgs
-    if ($LASTEXITCODE -ne 0) { throw "git $($CmdArgs -join ' ') 失败（退出码 $LASTEXITCODE）" }
+  # 透传 git 参数：位置参数会被 $args 收齐，具名数组参数会静默丢掉后面的项。
+  function Invoke-Git {
+    & git @args
+    if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') 失败（退出码 $LASTEXITCODE）" }
   }
 
   if (git status --porcelain) { throw '工作区有未提交的改动，先提交或暂存' }
