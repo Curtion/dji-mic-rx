@@ -31,7 +31,7 @@ jobs:
         run: |
           $version = (Get-Content mygo.json -Raw | ConvertFrom-Json).version
           if ("v$version" -ne $env:GITHUB_REF_NAME) {
-            throw "mygo.json 的版本 $version 与标签 $env:GITHUB_REF_NAME 不一致"
+            throw "mygo.json version $version does not match tag $env:GITHUB_REF_NAME"
           }
 
       - name: Test
@@ -44,7 +44,7 @@ jobs:
           gh release view "$env:GITHUB_REF_NAME" --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
             gh release create "$env:GITHUB_REF_NAME" --repo "$env:GITHUB_REPOSITORY" --draft --verify-tag --title "$env:GITHUB_REF_NAME" --generate-notes
-            if ($LASTEXITCODE -ne 0) { throw "创建草稿 Release 失败" }
+            if ($LASTEXITCODE -ne 0) { throw "failed to create the draft release" }
           }
 
       - name: Build signed driver package, installer and updates
