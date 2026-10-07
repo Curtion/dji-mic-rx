@@ -1,6 +1,7 @@
 # Build output
 /dji-mic-rx.exe
 /dji-mic-rx
+/rsrc_windows_*.syso
 
 # Go workspace files
 *.test
